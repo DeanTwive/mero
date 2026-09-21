@@ -5,10 +5,15 @@
   "main": "index.html",
   "scripts": {
     "start": "live-server --port=8085 --no-browser",
-    "dev": "live-server --port=8085 --no-browser"
+    "dev": "live-server --port=8085 --no-browser",
+    "deploy": "firebase deploy --only hosting --project dev",
+    "deploy:dev": "firebase deploy --only hosting --project dev"
   },
   "dependencies": {
     "firebase": "^12.19.0",
     "live-server": "^1.2.2"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.30.2"
   }
 }
