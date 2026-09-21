@@ -22,6 +22,108 @@ import { db } from "./firebase.js";
 class MeroDbService {
   constructor() {
     this.videosCollection = collection(db, "videos");
+    this.tagsCollection = collection(db, "tags");
+  }
+
+  // --- Firestore Tags Collection & Seeding ---
+  async getTags() {
+    try {
+      const snap = await getDocs(this.tagsCollection);
+      const tags = [];
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.name) {
+          tags.push(data.name);
+        } else if (d.id) {
+          tags.push(d.id.charAt(0).toUpperCase() + d.id.slice(1));
+        }
+      });
+
+      if (tags.length === 0) {
+        return await this.seedDefaultTags();
+      }
+
+      return Array.from(new Set(tags)).sort();
+    } catch (err) {
+      console.warn("Could not fetch tags from Firestore:", err);
+      return ["Gaming", "Tech", "Coding", "Lo-Fi", "Design", "Tutorial", "AI", "Music", "Animation", "Vlog", "Podcast", "Entertainment"];
+    }
+  }
+
+  async seedDefaultTags() {
+    const defaultTags = [
+      "Gaming", 
+      "Tech", 
+      "Coding", 
+      "Lo-Fi", 
+      "Design", 
+      "Tutorial", 
+      "AI", 
+      "Music", 
+      "Animation", 
+      "Vlog", 
+      "Podcast",
+      "Entertainment"
+    ];
+
+    try {
+      for (const name of defaultTags) {
+        const tagRef = doc(db, "tags", name.toLowerCase());
+        await setDoc(tagRef, {
+          name: name,
+          slug: name.toLowerCase(),
+          createdAt: serverTimestamp()
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Failed to seed tags in Firestore:", e);
+    }
+    return defaultTags;
+  }
+
+  async addTag(tagName) {
+    if (!tagName) return;
+    const clean = String(tagName).replace(/^#+/, "").trim();
+    if (!clean) return;
+    const slug = clean.toLowerCase();
+    const formatted = clean.charAt(0).toUpperCase() + clean.slice(1);
+    try {
+      const tagRef = doc(db, "tags", slug);
+      await setDoc(tagRef, {
+        name: formatted,
+        slug: slug,
+        createdAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Failed to add tag to Firestore:", e);
+    }
+    return formatted;
+  }
+
+  _normalizeVideo(data) {
+    if (!data) return data;
+    let videoSrc = data.videoSrc || "";
+    let thumbnail = data.thumbnail || "";
+    if (videoSrc.includes("vz-759040.b-cdn.net")) {
+      videoSrc = videoSrc.replace("vz-759040.b-cdn.net", "vz-95ca6a68-303.b-cdn.net");
+    }
+    if (thumbnail.includes("vz-759040.b-cdn.net")) {
+      thumbnail = thumbnail.replace("vz-759040.b-cdn.net", "vz-95ca6a68-303.b-cdn.net");
+    }
+    // Clean and normalize tags array
+    let tags = [];
+    if (Array.isArray(data.tags)) {
+      tags = data.tags.map(t => String(t).replace(/^#+/, "").trim().toLowerCase()).filter(Boolean);
+    } else if (typeof data.tags === "string" && data.tags.trim()) {
+      tags = data.tags.split(/[,\s]+/).map(t => t.replace(/^#+/, "").trim().toLowerCase()).filter(Boolean);
+    }
+
+    return {
+      ...data,
+      videoSrc,
+      thumbnail,
+      tags
+    };
   }
 
   // --- Real Videos Collection ---
@@ -32,7 +134,8 @@ class MeroDbService {
       const videos = [];
 
       snapshot.forEach(docSnap => {
-        const data = docSnap.data();
+        const rawData = docSnap.data();
+        const data = this._normalizeVideo(rawData);
         videos.push({
           id: docSnap.id,
           ...data,
@@ -47,7 +150,7 @@ class MeroDbService {
       // Fallback to locally published uploads if offline
       try {
         const local = JSON.parse(localStorage.getItem("mero_published_videos") || "[]");
-        return local;
+        return local.map(v => this._normalizeVideo(v));
       } catch (e) {
         return [];
       }
@@ -56,9 +159,12 @@ class MeroDbService {
 
   async createVideo(videoData) {
     try {
+      const tags = Array.isArray(videoData.tags) ? videoData.tags : [];
+      const primaryCategory = tags.length > 0 ? (tags[0].charAt(0).toUpperCase() + tags[0].slice(1)) : (videoData.category || "General");
+
       const payload = {
         title: videoData.title,
-        category: videoData.category || "General",
+        category: primaryCategory,
         videoSrc: videoData.videoSrc,
         originalUrl: videoData.originalUrl || videoData.videoSrc,
         isEmbed: videoData.isEmbed !== undefined ? videoData.isEmbed : false,
@@ -70,14 +176,15 @@ class MeroDbService {
         durationFormatted: videoData.durationFormatted || (videoData.isEmbed ? "Stream" : "2:00"),
         views: "1 view",
         channel: {
-          id: videoData.channel.id || "ch-creator",
-          name: videoData.channel.name || "Creator",
-          avatar: videoData.channel.avatar,
-          handle: "@" + (videoData.channel.name || "creator").toLowerCase().replace(/\s+/g, ""),
+          id: videoData.channel?.id || "ch-creator",
+          name: videoData.channel?.name || "Creator",
+          avatar: videoData.channel?.avatar,
+          handle: "@" + (videoData.channel?.name || "creator").toLowerCase().replace(/\s+/g, ""),
           verified: false,
           subscribers: "1 subscriber"
         },
         description: videoData.description || "",
+        tags: tags,
         chapters: videoData.chapters || [],
         comments: [],
         createdAt: serverTimestamp(),
@@ -86,6 +193,9 @@ class MeroDbService {
 
       const docRef = await addDoc(this.videosCollection, payload);
       const newVideo = { id: docRef.id, ...payload, uploadedAt: "Just now" };
+
+      // Register all tags in Firestore tags collection asynchronously
+      tags.forEach(t => this.addTag(t).catch(() => {}));
 
       // Also cache in local published list
       try {

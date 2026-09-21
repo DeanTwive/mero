@@ -18,13 +18,73 @@ class MeroFeedController {
     this.renderCategoryChips();
   }
 
+  _parseViews(views) {
+    if (typeof views === "number") return views;
+    if (!views) return 0;
+    const str = String(views).trim().toLowerCase().replace(/,/g, "");
+    const numPart = parseFloat(str) || 0;
+    if (str.includes("m")) return numPart * 1000000;
+    if (str.includes("k")) return numPart * 1000;
+    return numPart;
+  }
+
+  _parseDuration(duration, formatted) {
+    if (typeof duration === "number" && !isNaN(duration) && duration > 0) return duration;
+    const str = String(duration || formatted || "").trim();
+    const parts = str.split(":").map(Number);
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parseFloat(str) || 0;
+  }
+
+  _getVideoTimestamp(video) {
+    if (!video) return 0;
+    if (video.createdAt) {
+      if (typeof video.createdAt.toMillis === "function") return video.createdAt.toMillis();
+      if (typeof video.createdAt.seconds === "number") return video.createdAt.seconds * 1000;
+      if (typeof video.createdAt === "number") return video.createdAt;
+      const parsed = Date.parse(video.createdAt);
+      if (!isNaN(parsed)) return parsed;
+    }
+    if (typeof video.id === "string" && video.id.startsWith("vid-")) {
+      const num = parseInt(video.id.replace("vid-", ""), 10);
+      if (!isNaN(num)) return num;
+    }
+    return 0;
+  }
+
   renderCategoryChips() {
     if (!this.chipsContainer) return;
     this.chipsContainer.innerHTML = "";
 
-    MERO_CATEGORIES.forEach(cat => {
+    const basePills = Array.isArray(MERO_CATEGORIES) && MERO_CATEGORIES.length > 0
+      ? [...MERO_CATEGORIES]
+      : ["All", "Newest", "Most viewed", "Longest"];
+
+    // Also collect tags from all active videos
+    const allTags = new Set();
+    const list = window.MERO_VIDEOS || [];
+    list.forEach(v => {
+      if (Array.isArray(v.tags)) {
+        v.tags.forEach(t => {
+          const clean = String(t).replace(/^#+/, "").trim();
+          if (clean) allTags.add(clean.toLowerCase());
+        });
+      }
+    });
+
+    const pills = [...basePills];
+    allTags.forEach(tag => {
+      const tagChip = `#${tag}`;
+      if (!pills.some(p => p.toLowerCase() === tagChip.toLowerCase())) {
+        pills.push(tagChip);
+      }
+    });
+
+    pills.forEach(cat => {
       const btn = document.createElement("button");
-      btn.className = `chip-btn ${cat === this.activeCategory ? "active" : ""}`;
+      const isSelected = cat.toLowerCase() === this.activeCategory.toLowerCase();
+      btn.className = `chip-btn ${isSelected ? "active" : ""}`;
       btn.textContent = cat;
       btn.addEventListener("click", () => {
         this.activeCategory = cat;
@@ -39,7 +99,7 @@ class MeroFeedController {
     if (!this.chipsContainer) return;
     const chips = this.chipsContainer.querySelectorAll(".chip-btn");
     chips.forEach(chip => {
-      chip.classList.toggle("active", chip.textContent === this.activeCategory);
+      chip.classList.toggle("active", chip.textContent.toLowerCase() === this.activeCategory.toLowerCase());
     });
   }
 
@@ -75,21 +135,48 @@ class MeroFeedController {
   renderFeed(customVideoList = null) {
     if (!this.container) return;
 
-    let list = customVideoList || MERO_VIDEOS;
+    let list = customVideoList ? [...customVideoList] : [...(window.MERO_VIDEOS || [])];
 
-    // Filter by category
-    if (!customVideoList && this.activeCategory !== "All") {
-      list = list.filter(v => v.category.toLowerCase() === this.activeCategory.toLowerCase());
+    const active = (this.activeCategory || "All").trim();
+    const activeLower = active.toLowerCase();
+
+    // 1. Sort or filter by active category / tag
+    if (activeLower === "newest") {
+      list.sort((a, b) => this._getVideoTimestamp(b) - this._getVideoTimestamp(a));
+    } else if (activeLower === "most viewed") {
+      list.sort((a, b) => this._parseViews(b.views) - this._parseViews(a.views));
+    } else if (activeLower === "longest") {
+      list.sort((a, b) => {
+        const durA = this._parseDuration(a.duration, a.durationFormatted);
+        const durB = this._parseDuration(b.duration, b.durationFormatted);
+        return durB - durA;
+      });
+    } else if (activeLower !== "all") {
+      // It's a tag or specific category
+      const targetTag = activeLower.replace(/^#+/, "");
+      list = list.filter(v => {
+        const catMatch = v.category && v.category.toLowerCase() === activeLower;
+        const tagMatch = Array.isArray(v.tags) && v.tags.some(t => {
+          const tClean = String(t).replace(/^#+/, "").trim().toLowerCase();
+          return tClean === targetTag;
+        });
+        return catMatch || tagMatch;
+      });
     }
 
-    // Filter by search query
+    // 2. Filter by search query (including tags)
     if (this.searchQuery) {
+      const q = this.searchQuery.replace(/^#+/, "").trim().toLowerCase();
       list = list.filter(v => {
-        const matchTitle = v.title.toLowerCase().includes(this.searchQuery);
-        const matchCreator = v.channel.name.toLowerCase().includes(this.searchQuery);
-        const matchCategory = v.category.toLowerCase().includes(this.searchQuery);
-        const matchDesc = v.description.toLowerCase().includes(this.searchQuery);
-        return matchTitle || matchCreator || matchCategory || matchDesc;
+        const matchTitle = v.title && v.title.toLowerCase().includes(q);
+        const matchCreator = v.channel?.name && v.channel.name.toLowerCase().includes(q);
+        const matchCategory = v.category && v.category.toLowerCase().includes(q);
+        const matchDesc = v.description && v.description.toLowerCase().includes(q);
+        const matchTags = Array.isArray(v.tags) && v.tags.some(t => {
+          const tClean = String(t).replace(/^#+/, "").trim().toLowerCase();
+          return tClean.includes(q);
+        });
+        return matchTitle || matchCreator || matchCategory || matchDesc || matchTags;
       });
     }
 
@@ -116,7 +203,6 @@ class MeroFeedController {
     card.innerHTML = `
       <div class="card-thumbnail-wrap">
         <img class="card-thumbnail-img" src="${video.thumbnail}" alt="${video.title}" loading="lazy" />
-        <span class="category-badge">${video.category}</span>
         <span class="duration-badge">${video.durationFormatted}</span>
         <div class="card-quick-actions">
           <button class="card-quick-btn ${isSaved ? "saved" : ""}" data-action="save" title="Watch Later" aria-label="Save to Watch Later">
@@ -186,6 +272,7 @@ class MeroFeedController {
       console.warn("Could not fetch videos from Firestore:", e);
     } finally {
       this.isLoading = false;
+      this.renderCategoryChips();
       this.renderFeed();
     }
   }
@@ -203,7 +290,7 @@ class MeroFeedController {
           <p class="empty-state-text">
             Be the first creator to publish content on Mero! Sign in and upload your first video.
           </p>
-          <button class="btn-empty-action" id="emptyUploadFirstVideoBtn">
+          <button class="btn-empty-action" id="emptyUploadFirstVideoBtn" onclick="window.openUploadModal ? window.openUploadModal() : (window.meroUpload ? window.meroUpload.handleUploadTrigger() : window.openAuthModal?.('Sign in to upload and share your videos on Mero.'))">
             <svg class="icon" style="width: 18px; height: 18px; stroke: #fff;" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             <span>Upload First Video</span>
           </button>
@@ -212,8 +299,15 @@ class MeroFeedController {
 
       const uploadBtn = document.getElementById("emptyUploadFirstVideoBtn");
       if (uploadBtn) {
-        uploadBtn.addEventListener("click", () => {
-          window.meroUpload?.handleUploadTrigger();
+        uploadBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (typeof window.openUploadModal === "function") {
+            window.openUploadModal();
+          } else if (window.meroUpload?.handleUploadTrigger) {
+            window.meroUpload.handleUploadTrigger();
+          } else {
+            window.openAuthModal?.("Sign in to upload and share your videos on Mero.");
+          }
         });
       }
       return;

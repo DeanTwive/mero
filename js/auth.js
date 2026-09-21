@@ -135,9 +135,13 @@ class MeroAuthManager {
 
         try {
           this.setLoading(true);
-          await signInWithEmailAndPassword(auth, email, pass);
+          const cred = await signInWithEmailAndPassword(auth, email, pass);
           window.showToast("Signed in successfully!");
           this.closeAuthModal();
+          if (typeof this.authCallback === "function") {
+            this.authCallback(cred.user);
+            this.authCallback = null;
+          }
         } catch (err) {
           this.showAuthError(this.formatAuthError(err.code));
         } finally {
@@ -163,6 +167,10 @@ class MeroAuthManager {
           }
           window.showToast("Account created successfully!");
           this.closeAuthModal();
+          if (typeof this.authCallback === "function") {
+            this.authCallback(cred.user);
+            this.authCallback = null;
+          }
         } catch (err) {
           this.showAuthError(this.formatAuthError(err.code));
         } finally {
@@ -252,16 +260,31 @@ class MeroAuthManager {
 
   openAuthModal(reason = null, callback = null) {
     this.authCallback = callback;
+    if (!this.authModal) {
+      this.authModal = document.getElementById("authModal");
+    }
     const reasonEl = document.getElementById("authModalReason");
     if (reasonEl) {
       reasonEl.textContent = reason || "Sign in to access creator tools, subscriptions, and upload videos.";
     }
     this.clearAuthErrors();
-    if (this.authModal) this.authModal.classList.add("active");
+    if (this.authModal) {
+      this.authModal.classList.add("active");
+      document.body.classList.add("modal-open");
+      console.log("🔓 [MeroAuth] Opened Auth Modal:", reason || "Default");
+    } else {
+      console.error("❌ [MeroAuth] #authModal not found in DOM!");
+    }
   }
 
   closeAuthModal() {
-    if (this.authModal) this.authModal.classList.remove("active");
+    if (!this.authModal) {
+      this.authModal = document.getElementById("authModal");
+    }
+    if (this.authModal) {
+      this.authModal.classList.remove("active");
+      document.body.classList.remove("modal-open");
+    }
     this.clearAuthErrors();
   }
 
@@ -306,10 +329,24 @@ class MeroAuthManager {
 export const meroAuth = new MeroAuthManager();
 window.meroAuth = meroAuth;
 
+// Override the early fallback with the real implementation
+window.openAuthModal = (reason, callback) => meroAuth.openAuthModal(reason, callback);
+window.closeAuthModal = () => meroAuth.closeAuthModal();
+
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     meroAuth.init();
+    // Pick up any callback that was set before the module loaded
+    if (window._pendingAuthCallback) {
+      meroAuth.authCallback = window._pendingAuthCallback;
+      window._pendingAuthCallback = null;
+    }
   });
 } else {
   meroAuth.init();
+  // Pick up any callback that was set before the module loaded
+  if (window._pendingAuthCallback) {
+    meroAuth.authCallback = window._pendingAuthCallback;
+    window._pendingAuthCallback = null;
+  }
 }

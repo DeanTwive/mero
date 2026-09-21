@@ -8,13 +8,9 @@ let MERO_VIDEOS = [];
 
 const MERO_CATEGORIES = [
   "All",
-  "Tech",
-  "Coding",
-  "Lo-Fi",
-  "Gaming",
-  "Design",
-  "AI",
-  "Music"
+  "Newest",
+  "Most viewed",
+  "Longest"
 ];
 
 // Load real videos from Cloud Firestore

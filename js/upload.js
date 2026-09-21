@@ -1,15 +1,16 @@
 /* ==========================================================================
    Mero Upload Content Studio (Dual Mode)
-   1. Direct File Upload -> Firebase Storage & Custom Cinematic Player
+   1. Direct File Upload -> Bunny.net Stream (HLS, global CDN, adult-OK)
    2. Embed Stream Link  -> Zero-Host Iframe Protocol (YouTube/Vimeo/Dailymotion)
    ========================================================================== */
 
-import { storage } from "./firebase.js";
-import { 
-  ref, 
-  uploadBytesResumable, 
-  getDownloadURL 
-} from "firebase/storage";
+// ── Bunny.net Stream Configuration ──────────────────────────────────────────
+// IMPORTANT: Rotate your API key in Bunny dashboard after setup is complete.
+// In production, move this to a backend endpoint so the key is never public.
+const BUNNY_LIBRARY_ID = "759040";
+const BUNNY_API_KEY = "d06ec310-5582-4578-8a1f461d3557-2965-4b78";
+const BUNNY_API_BASE = "https://video.bunnycdn.com/library";
+const BUNNY_CDN_HOST = "https://vz-95ca6a68-303.b-cdn.net"; // Dedicated Pull Zone CDN hostname
 
 class MeroUploadManager {
   constructor() {
@@ -21,18 +22,100 @@ class MeroUploadManager {
     this.detectedDuration = 120;
     this.uploadTask = null;
     this.isUploading = false;
+
+    // Tags State (Multiple tags from Firestore)
+    this.selectedTags = new Set();
+    this.availableTags = [];
+
+    // 6-Frame Thumbnail Previews State
+    this.capturedThumbnails = [];
+    this.selectedThumbnailUrl = "";
+    this.selectedThumbnailIndex = -1;
   }
 
   init() {
     this.modal = document.getElementById("uploadModal");
     this.form = document.getElementById("uploadForm");
     this.bindEvents();
+    this.bindTagSelector();
+    this.bindThumbnailPicker();
+    this.switchMode("file");
+    this.loadAvailableTags();
+  }
+
+  handleUploadTrigger() {
+    const user = window.meroAuth?.currentUser;
+    if (!user) {
+      if (typeof window.openAuthModal === "function") {
+        window.openAuthModal("Sign in to upload and share your videos on Mero.", () => {
+          this.openModal();
+        });
+      } else if (window.meroAuth?.openAuthModal) {
+        window.meroAuth.openAuthModal("Sign in to upload and share your videos on Mero.", () => {
+          this.openModal();
+        });
+      } else {
+        const modal = document.getElementById("authModal");
+        if (modal) {
+          modal.classList.add("active");
+          document.body.classList.add("modal-open");
+        }
+      }
+      return;
+    }
+    this.openModal();
+  }
+
+  openModal() {
+    this.modal = this.modal || document.getElementById("uploadModal");
+    if (this.modal) {
+      this.modal.classList.add("active");
+      document.body.classList.add("modal-open");
+    }
+    this.loadAvailableTags();
+  }
+
+  closeModal() {
+    if (this.uploadTask && typeof this.uploadTask.abort === "function") {
+      this.uploadTask.abort();
+    }
+    this.uploadTask = null;
+    this.isUploading = false;
+
+    this.modal = this.modal || document.getElementById("uploadModal");
+    if (this.modal) {
+      this.modal.classList.remove("active");
+      document.body.classList.remove("modal-open");
+    }
+    this.clearSelectedFile();
+    this.selectedTags.clear();
+    this.renderSelectedTags();
+    this.renderAvailableTags();
+    this.hideProgressBar();
+
+    const providerPill = document.getElementById("urlProviderPill");
+    if (providerPill) providerPill.style.display = "none";
+    const urlSubhint = document.getElementById("urlSubhint");
+    if (urlSubhint) urlSubhint.textContent = "Supports YouTube, Vimeo, Dailymotion";
+
+    const customWrap = document.getElementById("customThumbUrlWrap");
+    if (customWrap) customWrap.style.display = "none";
+    const toggleBtn = document.getElementById("toggleCustomThumbBtn");
+    if (toggleBtn) toggleBtn.textContent = "+ Custom URL";
+
+    const submitBtn = document.getElementById("uploadSubmitBtn");
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Upload Video";
+    }
+
+    if (this.form) this.form.reset();
     this.switchMode("file");
   }
 
   bindEvents() {
     // Global Studio & Upload Triggers
-    const triggerIds = ["topUploadBtn", "sidebarStudioBtn", "mobileUploadBtn", "dropdownUploadBtn"];
+    const triggerIds = ["topUploadBtn", "sidebarStudioBtn", "mobileUploadBtn", "dropdownUploadBtn", "emptyUploadFirstVideoBtn"];
     triggerIds.forEach(id => {
       const btn = document.getElementById(id);
       if (btn) {
@@ -142,9 +225,12 @@ class MeroUploadManager {
           urlSubhint.textContent = `✓ Stream will be rendered securely via ${parsed.providerName} iframe embed`;
         }
 
-        // Auto-populate thumbnail if empty and provider has a default poster
-        if (parsed.defaultThumbnail && thumbInput && !thumbInput.value) {
-          thumbInput.value = parsed.defaultThumbnail;
+        // Auto-populate thumbnail if provider has a default poster
+        if (parsed.defaultThumbnail) {
+          this.renderEmbedThumbnailCard(parsed.defaultThumbnail, parsed.providerName);
+          if (thumbInput && !thumbInput.value) {
+            thumbInput.value = parsed.defaultThumbnail;
+          }
         }
       });
     }
@@ -177,7 +263,7 @@ class MeroUploadManager {
       if (panelEmbed) panelEmbed.style.display = "none";
       if (urlInput) urlInput.removeAttribute("required");
       if (submitBtn && !this.isUploading) {
-        submitBtn.textContent = "Upload & Publish Video";
+        submitBtn.textContent = "Upload Video";
       }
     } else {
       if (tabEmbedLink) {
@@ -230,13 +316,17 @@ class MeroUploadManager {
       titleInput.value = cleanName;
     }
 
-    // Extract video duration and capture thumbnail frame via ephemeral video element
-    this.extractVideoMetadata(file);
+    // Generate 6 thumbnail frame previews from video
+    this.generateThumbnailOptions(file);
   }
 
   clearSelectedFile() {
     this.selectedVideoFile = null;
     this.autoGeneratedThumbnail = "";
+    this.capturedThumbnails = [];
+    this.selectedThumbnailUrl = "";
+    this.selectedThumbnailIndex = -1;
+
     const fileInput = document.getElementById("uploadVideoFile");
     if (fileInput) fileInput.value = "";
 
@@ -245,55 +335,326 @@ class MeroUploadManager {
     if (emptyState) emptyState.style.display = "flex";
     if (selectedState) selectedState.style.display = "none";
 
+    const thumbGrid = document.getElementById("thumbnailPreviewsGrid");
+    if (thumbGrid) {
+      thumbGrid.innerHTML = `
+        <div class="thumb-empty-hint" id="thumbEmptyHint">
+          <span>Select a video to generate preview thumbnails</span>
+        </div>
+      `;
+    }
+
     const thumbInput = document.getElementById("uploadThumbUrl");
-    if (thumbInput && thumbInput.placeholder.includes("Frame captured")) {
-      thumbInput.placeholder = "Auto-captured from video frame, YouTube poster, or custom URL";
+    if (thumbInput) thumbInput.value = "";
+  }
+
+  // --- Tag Selector Methods (Firestore Collection) ---
+  bindTagSelector() {
+    const customInput = document.getElementById("tagCustomInput");
+    if (!customInput) return;
+
+    customInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === ",") {
+        e.preventDefault();
+        const val = customInput.value.trim();
+        if (val) {
+          this.addCustomTag(val);
+          customInput.value = "";
+        }
+      }
+    });
+
+    customInput.addEventListener("blur", () => {
+      const val = customInput.value.trim();
+      if (val) {
+        this.addCustomTag(val);
+        customInput.value = "";
+      }
+    });
+  }
+
+  async loadAvailableTags() {
+    try {
+      if (window.meroDb && typeof window.meroDb.getTags === "function") {
+        this.availableTags = await window.meroDb.getTags();
+      } else {
+        this.availableTags = ["Gaming", "Tech", "Coding", "Lo-Fi", "Design", "Tutorial", "AI", "Music", "Animation", "Vlog", "Podcast", "Entertainment"];
+      }
+    } catch (e) {
+      console.warn("Could not load tags from Firestore:", e);
+      this.availableTags = ["Gaming", "Tech", "Coding", "Lo-Fi", "Design", "Tutorial", "AI", "Music", "Animation", "Vlog", "Podcast", "Entertainment"];
+    }
+    this.renderAvailableTags();
+  }
+
+  renderAvailableTags() {
+    const listEl = document.getElementById("availableTagsList");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    if (!this.availableTags || this.availableTags.length === 0) {
+      listEl.innerHTML = `<span style="font-size: 11px; color: var(--text-dimmed); font-style: italic;">No tags found.</span>`;
+      this.renderSelectedTags();
+      return;
+    }
+
+    // Separate selected vs unselected so selected tags appear prominently first
+    const selected = [];
+    const unselected = [];
+    this.availableTags.forEach(tagName => {
+      if (this.selectedTags.has(tagName.toLowerCase())) {
+        selected.push(tagName);
+      } else {
+        unselected.push(tagName);
+      }
+    });
+
+    const orderedTags = [...selected, ...unselected];
+
+    orderedTags.forEach(tagName => {
+      const isSelected = this.selectedTags.has(tagName.toLowerCase());
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `tag-pick-btn ${isSelected ? "is-selected" : ""}`;
+      btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+
+      if (isSelected) {
+        btn.innerHTML = `<span class="tag-status-icon">✓</span> <span class="tag-name">${tagName}</span> <span class="tag-remove-icon" title="Deselect tag">&times;</span>`;
+      } else {
+        btn.innerHTML = `<span class="tag-status-icon">+</span> <span class="tag-name">${tagName}</span>`;
+      }
+
+      btn.addEventListener("click", () => {
+        this.toggleTag(tagName);
+      });
+      listEl.appendChild(btn);
+    });
+
+    this.renderSelectedTags();
+  }
+
+  toggleTag(tagName) {
+    if (!tagName) return;
+    const clean = tagName.replace(/^#+/, "").trim();
+    const key = clean.toLowerCase();
+    if (this.selectedTags.has(key)) {
+      this.selectedTags.delete(key);
+    } else {
+      this.selectedTags.add(key);
+    }
+    this.renderAvailableTags();
+  }
+
+  addCustomTag(rawText) {
+    if (!rawText) return;
+    const items = rawText.split(/[,\s]+/).map(t => t.replace(/^#+/, "").trim()).filter(Boolean);
+    items.forEach(clean => {
+      const key = clean.toLowerCase();
+      const formatted = clean.charAt(0).toUpperCase() + clean.slice(1);
+      this.selectedTags.add(key);
+      if (!this.availableTags.some(t => t.toLowerCase() === key)) {
+        this.availableTags.unshift(formatted);
+        if (window.meroDb?.addTag) {
+          window.meroDb.addTag(formatted).catch(() => {});
+        }
+      }
+    });
+    this.renderAvailableTags();
+  }
+
+  removeTag(key) {
+    this.selectedTags.delete(key.toLowerCase());
+    this.renderAvailableTags();
+  }
+
+  renderSelectedTags() {
+    const countEl = document.getElementById("selectedTagsCount");
+    if (countEl) {
+      const count = this.selectedTags.size;
+      countEl.textContent = `${count} selected`;
     }
   }
 
-  extractVideoMetadata(file) {
+  // --- 6 Image Thumbnail Previews Methods ---
+  bindThumbnailPicker() {
+    const toggleBtn = document.getElementById("toggleCustomThumbBtn");
+    const customWrap = document.getElementById("customThumbUrlWrap");
+    const thumbInput = document.getElementById("uploadThumbUrl");
+
+    if (toggleBtn && customWrap) {
+      toggleBtn.addEventListener("click", () => {
+        const isHidden = customWrap.style.display === "none";
+        customWrap.style.display = isHidden ? "block" : "none";
+        toggleBtn.textContent = isHidden ? "✕ Hide Custom URL" : "+ Custom URL";
+      });
+    }
+
+    if (thumbInput) {
+      thumbInput.addEventListener("input", () => {
+        const val = thumbInput.value.trim();
+        if (val) {
+          this.selectedThumbnailUrl = val;
+          const grid = document.getElementById("thumbnailPreviewsGrid");
+          grid?.querySelectorAll(".thumb-preview-card").forEach(c => c.classList.remove("is-selected"));
+        }
+      });
+    }
+  }
+
+  renderThumbnailSkeletons() {
+    const grid = document.getElementById("thumbnailPreviewsGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    for (let i = 0; i < 6; i++) {
+      const card = document.createElement("div");
+      card.className = "thumb-preview-card thumb-skeleton";
+      card.innerHTML = `<div class="skeleton-thumb shimmer" style="width: 100%; height: 100%;"></div>`;
+      grid.appendChild(card);
+    }
+  }
+
+  async generateThumbnailOptions(file) {
+    const grid = document.getElementById("thumbnailPreviewsGrid");
+    if (!grid) return;
+
+    this.renderThumbnailSkeletons();
+    this.capturedThumbnails = [];
+
     const tempUrl = URL.createObjectURL(file);
     const tempVideo = document.createElement("video");
-    tempVideo.preload = "metadata";
+    tempVideo.preload = "auto";
     tempVideo.src = tempUrl;
     tempVideo.muted = true;
     tempVideo.playsInline = true;
 
-    tempVideo.onloadedmetadata = () => {
-      const dur = tempVideo.duration || 120;
+    try {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => resolve(), 6000);
+        tempVideo.onloadedmetadata = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+        tempVideo.onerror = (e) => reject(e);
+      });
+
+      const dur = tempVideo.duration || 60;
       this.detectedDuration = Math.round(dur);
       const metaEl = document.getElementById("selectedFileMeta");
       if (metaEl) {
         metaEl.textContent = `${this.formatFileSize(file.size)} • ${this.formatDuration(dur)}`;
       }
 
-      // Seek to 1s or midpoint to capture a crisp thumbnail frame
-      tempVideo.currentTime = Math.min(1.5, dur / 2);
-    };
+      // Calculate 6 timestamps spread evenly across the video
+      const fractions = [0.08, 0.24, 0.40, 0.58, 0.74, 0.90];
+      const timestamps = fractions.map(f => Math.min(Math.max(0.5, dur * f), Math.max(0.5, dur - 0.5)));
 
-    tempVideo.onseeked = () => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = tempVideo.videoWidth || 640;
-        canvas.height = tempVideo.videoHeight || 360;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
-        this.autoGeneratedThumbnail = canvas.toDataURL("image/jpeg", 0.85);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
 
-        const thumbInput = document.getElementById("uploadThumbUrl");
-        if (thumbInput && !thumbInput.value) {
-          thumbInput.placeholder = "✓ Frame captured from video! (or enter custom image URL)";
+      for (let i = 0; i < timestamps.length; i++) {
+        const time = timestamps[i];
+        try {
+          await new Promise((resolve) => {
+            const seekTimeout = setTimeout(() => resolve(), 2500);
+            tempVideo.onseeked = () => {
+              clearTimeout(seekTimeout);
+              try {
+                canvas.width = tempVideo.videoWidth || 640;
+                canvas.height = tempVideo.videoHeight || 360;
+                ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+                const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+                this.capturedThumbnails.push({
+                  dataUrl,
+                  timestamp: time,
+                  formattedTime: this.formatDuration(time)
+                });
+              } catch (err) {
+                console.warn("Frame draw error:", err);
+              }
+              resolve();
+            };
+            tempVideo.currentTime = time;
+          });
+        } catch (e) {
+          console.warn("Seek error:", e);
         }
-      } catch (err) {
-        console.warn("Could not capture video frame thumbnail:", err);
-      } finally {
-        URL.revokeObjectURL(tempUrl);
       }
-    };
 
-    tempVideo.onerror = () => {
+    } catch (err) {
+      console.warn("Thumbnail generation error:", err);
+    } finally {
       URL.revokeObjectURL(tempUrl);
-    };
+    }
+
+    if (this.capturedThumbnails.length > 0) {
+      // Pick 2nd frame (index 1) or 1st as default
+      this.selectedThumbnailIndex = this.capturedThumbnails.length > 1 ? 1 : 0;
+      this.selectedThumbnailUrl = this.capturedThumbnails[this.selectedThumbnailIndex].dataUrl;
+      this.autoGeneratedThumbnail = this.selectedThumbnailUrl;
+      this.renderThumbnailCards();
+    } else {
+      grid.innerHTML = `
+        <div class="thumb-empty-hint">
+          <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <span>Could not extract frames. Please provide a custom thumbnail URL.</span>
+        </div>
+      `;
+    }
+  }
+
+  renderThumbnailCards() {
+    const grid = document.getElementById("thumbnailPreviewsGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    this.capturedThumbnails.forEach((item, index) => {
+      const isSelected = index === this.selectedThumbnailIndex;
+      const card = document.createElement("div");
+      card.className = `thumb-preview-card ${isSelected ? "is-selected" : ""}`;
+      card.title = `Click to choose frame at ${item.formattedTime} as thumbnail`;
+      card.innerHTML = `
+        <img class="thumb-preview-img" src="${item.dataUrl}" alt="Thumbnail option ${index + 1}" />
+        <span class="thumb-preview-time">${item.formattedTime}</span>
+        <div class="thumb-selected-badge">
+          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+      `;
+
+      card.addEventListener("click", () => {
+        this.selectedThumbnailIndex = index;
+        this.selectedThumbnailUrl = item.dataUrl;
+        this.autoGeneratedThumbnail = item.dataUrl;
+        const customThumbInput = document.getElementById("uploadThumbUrl");
+        if (customThumbInput) customThumbInput.value = "";
+        grid.querySelectorAll(".thumb-preview-card").forEach((c, i) => {
+          c.classList.toggle("is-selected", i === index);
+        });
+        window.showToast(`Selected frame at ${item.formattedTime} as thumbnail`);
+      });
+
+      grid.appendChild(card);
+    });
+  }
+
+  renderEmbedThumbnailCard(thumbUrl, providerName) {
+    const grid = document.getElementById("thumbnailPreviewsGrid");
+    if (!grid || !thumbUrl) return;
+    grid.innerHTML = "";
+    this.selectedThumbnailUrl = thumbUrl;
+    this.selectedThumbnailIndex = 0;
+
+    const card = document.createElement("div");
+    card.className = "thumb-preview-card is-selected";
+    card.style.gridColumn = "1 / -1";
+    card.style.maxHeight = "160px";
+    card.innerHTML = `
+      <img class="thumb-preview-img" src="${thumbUrl}" alt="${providerName} Poster" />
+      <span class="thumb-preview-time">${providerName} Poster</span>
+      <div class="thumb-selected-badge">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+      </div>
+    `;
+    grid.appendChild(card);
   }
 
   parseEmbedUrl(url) {
@@ -363,44 +724,6 @@ class MeroUploadManager {
     };
   }
 
-  handleUploadTrigger() {
-    const user = window.meroAuth?.currentUser;
-    if (!user) {
-      window.meroAuth?.openAuthModal(
-        "Please sign in to upload videos to Firebase Storage or publish embed links.",
-        () => this.openModal()
-      );
-      return;
-    }
-    this.openModal();
-  }
-
-  openModal() {
-    if (this.modal) this.modal.classList.add("active");
-  }
-
-  closeModal() {
-    if (this.isUploading) {
-      if (!confirm("An upload is currently in progress. Do you want to cancel?")) {
-        return;
-      }
-      if (this.uploadTask) {
-        this.uploadTask.cancel();
-      }
-      this.isUploading = false;
-    }
-
-    if (this.modal) this.modal.classList.remove("active");
-    if (this.form) this.form.reset();
-    this.clearSelectedFile();
-    this.hideProgressBar();
-
-    const providerPill = document.getElementById("urlProviderPill");
-    if (providerPill) providerPill.style.display = "none";
-    const urlSubhint = document.getElementById("urlSubhint");
-    if (urlSubhint) urlSubhint.textContent = "Supports YouTube, Vimeo, Dailymotion, or public iframe embed streams";
-  }
-
   showProgressBar() {
     const bar = document.getElementById("uploadProgressContainer");
     if (bar) bar.style.display = "flex";
@@ -419,10 +742,14 @@ class MeroUploadManager {
     const fill = document.getElementById("uploadProgressBarFill");
     const percentEl = document.getElementById("uploadProgressPercent");
     const statusEl = document.getElementById("uploadProgressStatus");
+    const submitBtn = document.getElementById("uploadSubmitBtn");
 
     const pct = Math.min(100, Math.max(0, Math.round(percentValue)));
     if (fill) fill.style.width = `${pct}%`;
     if (percentEl) percentEl.textContent = `${pct}%`;
+    if (submitBtn) {
+      submitBtn.textContent = `Uploading video... ${pct}%`;
+    }
     if (statusEl && total > 0) {
       statusEl.innerHTML = `
         <svg class="icon spin" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
@@ -440,10 +767,28 @@ class MeroUploadManager {
     }
 
     const title = document.getElementById("uploadTitle")?.value.trim();
-    const category = document.getElementById("uploadCategory")?.value || "General";
+    const pendingTag = document.getElementById("tagCustomInput")?.value.trim();
+    if (pendingTag) {
+      this.addCustomTag(pendingTag);
+      const tagInp = document.getElementById("tagCustomInput");
+      if (tagInp) tagInp.value = "";
+    }
+
     const description = document.getElementById("uploadDescription")?.value.trim() || "";
     const customThumbUrl = document.getElementById("uploadThumbUrl")?.value.trim();
     const submitBtn = document.getElementById("uploadSubmitBtn");
+
+    // Combine selected tags from multi-tag picker and any hashtags in description
+    const descTags = (description.match(/#[a-zA-Z0-9_]+/g) || [])
+      .map(t => t.replace(/^#+/, "").trim().toLowerCase())
+      .filter(Boolean);
+
+    const mergedTags = new Set([...this.selectedTags, ...descTags]);
+    if (mergedTags.size === 0) {
+      mergedTags.add("general");
+    }
+    const tags = Array.from(mergedTags);
+    const category = tags[0].charAt(0).toUpperCase() + tags[0].slice(1);
 
     if (!title) {
       window.showToast("Please enter a video title");
@@ -451,7 +796,7 @@ class MeroUploadManager {
     }
 
     // ------------------------------------------------------------------------
-    // CASE 1: File Upload (Firebase Storage)
+    // CASE 1: File Upload → Bunny.net Stream (HLS, global CDN)
     // ------------------------------------------------------------------------
     if (this.currentMode === "file") {
       if (!this.selectedVideoFile) {
@@ -460,91 +805,135 @@ class MeroUploadManager {
       }
 
       const file = this.selectedVideoFile;
-      const finalThumbnail = customThumbUrl || this.autoGeneratedThumbnail || window.generateAutoThumbnail(title, category);
+      const finalThumbnail = customThumbUrl || this.selectedThumbnailUrl || this.autoGeneratedThumbnail || window.generateAutoThumbnail(title, category);
 
       this.isUploading = true;
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = "Uploading video...";
+        submitBtn.textContent = "Uploading video... 0%";
       }
       this.showProgressBar();
 
-      // Clean file name
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const storagePath = `videos/${user.uid}/${Date.now()}_${safeName}`;
-      const videoStorageRef = ref(storage, storagePath);
-
       try {
-        const metadata = {
-          contentType: file.type || "video/mp4",
-          customMetadata: {
-            uploadedBy: user.uid,
-            creatorName: user.displayName || user.email || "Creator",
-            originalName: file.name
+        // ── Step 1: Create a new video entry in Bunny Stream library ────────
+        const createRes = await fetch(
+          `${BUNNY_API_BASE}/${BUNNY_LIBRARY_ID}/videos`,
+          {
+            method: "POST",
+            headers: {
+              "AccessKey": BUNNY_API_KEY,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ title })
           }
-        };
+        );
 
-        this.uploadTask = uploadBytesResumable(videoStorageRef, file, metadata);
+        if (!createRes.ok) {
+          const errText = await createRes.text();
+          throw new Error(`Bunny create video failed: ${createRes.status} — ${errText}`);
+        }
 
+        const { guid: videoId } = await createRes.json();
+        if (!videoId) throw new Error("Bunny did not return a video ID.");
+
+        // ── Step 2: Upload raw file bytes to Bunny (XHR for progress bar) ──
         await new Promise((resolve, reject) => {
-          this.uploadTask.on(
-            "state_changed",
-            (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              this.updateProgress(progress, snapshot.bytesTransferred, snapshot.totalBytes);
-            },
-            (error) => {
-              reject(error);
-            },
-            async () => {
-              try {
-                const downloadURL = await getDownloadURL(this.uploadTask.snapshot.ref);
-                resolve(downloadURL);
-              } catch (urlErr) {
-                reject(urlErr);
-              }
+          const xhr = new XMLHttpRequest();
+          // Store reference so closeModal() can abort it
+          this.uploadTask = xhr;
+
+          xhr.open("PUT", `${BUNNY_API_BASE}/${BUNNY_LIBRARY_ID}/videos/${videoId}`);
+          xhr.setRequestHeader("AccessKey", BUNNY_API_KEY);
+          xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+          xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable) {
+              const pct = (evt.loaded / evt.total) * 100;
+              this.updateProgress(pct, evt.loaded, evt.total);
             }
-          );
-        }).then(async (downloadURL) => {
-          // Video upload succeeded! Save record in Firestore
-          await this.savePublishedVideo({
-            user,
-            title,
-            category,
-            description,
-            videoSrc: downloadURL,
-            originalUrl: downloadURL,
-            isEmbed: false,
-            storageType: "firebase",
-            storagePath,
-            thumbnail: finalThumbnail,
-            duration: this.detectedDuration,
-            durationFormatted: this.formatDuration(this.detectedDuration),
-            toastMessage: "🎉 Video uploaded and published successfully!"
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              reject(new Error(`Upload failed: server returned ${xhr.status}. Check your API key.`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error("Network error — check your internet connection."));
+          xhr.onabort = () => reject(new Error("Upload cancelled."));
+
+          // Send raw bytes — no Content-Type override to avoid CORS preflight issues
+          xhr.send(file);
+        });
+
+        // ── Show "Publishing" status after bytes are sent ────────────────────
+        const statusEl = document.getElementById("uploadProgressStatus");
+        if (statusEl) {
+          statusEl.innerHTML = `
+            <svg class="icon spin" style="width: 14px; height: 14px;" viewBox="0 0 24 24"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>
+            <span>Publishing video...</span>
+          `;
+        }
+        if (submitBtn) {
+          submitBtn.textContent = "Publishing video...";
+        }
+
+        // ── Step 3: Build playback URLs ─────────────────────────────────────
+        let activeCdnHost = BUNNY_CDN_HOST;
+        try {
+          const checkRes = await fetch(`${BUNNY_API_BASE}/${BUNNY_LIBRARY_ID}/videos/${videoId}`, {
+            headers: { "AccessKey": BUNNY_API_KEY }
           });
-        }).catch(async (storageError) => {
-          console.warn("Firebase Storage upload exception:", storageError);
-          // If Firebase Storage is not yet provisioned/configured in user's Firebase console,
-          // provide friendly feedback and allow local preview fallback for smooth testing.
-          this.handleStorageUploadFallback({
-            storageError,
-            user,
-            file,
-            title,
-            category,
-            description,
-            finalThumbnail
-          });
+          if (checkRes.ok) {
+            const vidMeta = await checkRes.json();
+            if (vidMeta.thumbnailUrl) {
+              activeCdnHost = new URL(vidMeta.thumbnailUrl).origin;
+            }
+          }
+        } catch (e) {
+          console.warn("CDN domain check warning:", e);
+        }
+
+        // HLS stream  → plays in <video> element via hls.js or native Safari
+        const hlsUrl = `${activeCdnHost}/${videoId}/playlist.m3u8`;
+        // Embed iframe → fallback for browsers without HLS support
+        const embedUrl = `https://iframe.mediadelivery.net/embed/${BUNNY_LIBRARY_ID}/${videoId}?autoplay=true&loop=false&muted=false&preload=true`;
+        // Auto-thumbnail from Bunny (generated after processing, may take ~30s)
+        const bunnyThumb = `${activeCdnHost}/${videoId}/thumbnail.jpg`;
+
+        const resolvedThumbnail = finalThumbnail || bunnyThumb;
+
+        // ── Step 4: Save to Firestore ───────────────────────────────────────
+        await this.savePublishedVideo({
+          user,
+          title,
+          category,
+          tags,
+          description,
+          videoSrc: hlsUrl,       // primary: HLS stream
+          originalUrl: embedUrl,  // fallback: embed player
+          isEmbed: false,
+          storageType: "bunny_stream",
+          storagePath: videoId,   // store videoId for future management
+          thumbnail: resolvedThumbnail,
+          duration: this.detectedDuration,
+          durationFormatted: this.formatDuration(this.detectedDuration),
+          toastMessage: "🎉 Video uploaded and ready to stream!"
         });
 
       } catch (err) {
         console.error("Upload error:", err);
-        window.showToast("Upload failed: " + (err.message || "Please check connection."));
+        if (err.message !== "Upload cancelled.") {
+          window.showToast("Upload failed: " + (err.message || "Please check your connection."));
+        }
       } finally {
         this.isUploading = false;
+        this.uploadTask = null;
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.textContent = "Upload & Publish Video";
+          submitBtn.textContent = "Upload Video";
         }
       }
 
@@ -562,7 +951,7 @@ class MeroUploadManager {
 
     const parsed = this.parseEmbedUrl(rawUrl);
     const finalVideoSrc = parsed.embedUrl;
-    const finalThumbnail = customThumbUrl || parsed.defaultThumbnail || window.generateAutoThumbnail(title, category);
+    const finalThumbnail = customThumbUrl || this.selectedThumbnailUrl || parsed.defaultThumbnail || window.generateAutoThumbnail(title, category);
 
     if (submitBtn) {
       submitBtn.disabled = true;
@@ -574,6 +963,7 @@ class MeroUploadManager {
         user,
         title,
         category,
+        tags,
         description: description || `Embedded from ${parsed.providerName} by ${user.displayName || "Creator"} on Mero.`,
         videoSrc: finalVideoSrc,
         originalUrl: rawUrl,
@@ -597,20 +987,11 @@ class MeroUploadManager {
   }
 
   async handleStorageUploadFallback({ storageError, user, file, title, category, description, finalThumbnail }) {
+    // Local blob fallback: only used during development/testing when Bunny is unreachable
     const errorMsg = storageError?.message || "Storage service error";
-    console.log("Storage error details:", errorMsg);
+    console.log("Storage fallback triggered:", errorMsg);
+    window.showToast("Upload error — falling back to local preview: " + errorMsg);
 
-    const isBucketOrPerm = storageError?.code === "storage/bucket-not-found" || 
-                           storageError?.code === "storage/unauthorized" ||
-                           storageError?.code === "storage/unknown";
-
-    if (isBucketOrPerm) {
-      window.showToast("Notice: Cloud storage not configured yet. Saving for local playback preview!");
-    } else {
-      window.showToast("Upload error: " + errorMsg);
-    }
-
-    // Create local object URL for instant preview without blocking developer testing
     const localVideoUrl = URL.createObjectURL(file);
     await this.savePublishedVideo({
       user,
@@ -625,7 +1006,7 @@ class MeroUploadManager {
       thumbnail: finalThumbnail,
       duration: this.detectedDuration,
       durationFormatted: this.formatDuration(this.detectedDuration),
-      toastMessage: "🎉 Video file ready! Playing in Mero Cinema Player."
+      toastMessage: "⚠️ Local preview only — Bunny Stream unavailable."
     });
   }
 
@@ -634,6 +1015,7 @@ class MeroUploadManager {
       user,
       title,
       category,
+      tags = [],
       description,
       videoSrc,
       originalUrl,
@@ -652,6 +1034,7 @@ class MeroUploadManager {
     const newVideo = await window.meroDb.createVideo({
       title,
       category,
+      tags: Array.isArray(tags) ? tags : [],
       videoSrc,
       originalUrl,
       isEmbed: !!isEmbed,
@@ -676,15 +1059,22 @@ class MeroUploadManager {
     }
 
     window.showToast(toastMessage || "🎉 Video published successfully!");
+    this.isUploading = false;
+    this.uploadTask = null;
     this.closeModal();
 
-    // Refresh feed
+    // Refresh feed & chips so the new video and tags appear
     if (window.meroFeed) {
+      if (typeof window.meroFeed.renderCategoryChips === "function") {
+        window.meroFeed.renderCategoryChips();
+      }
       window.meroFeed.renderFeed();
     }
 
-    // Navigate to watch view immediately if it was a file upload, or home
-    if (window.meroApp) {
+    // Navigate directly to the new video's watch page
+    if (window.meroApp && newVideo?.id) {
+      window.meroApp.openWatchPage(newVideo.id);
+    } else if (window.meroApp) {
       window.meroApp.navigateTo("home");
     }
   }
@@ -733,6 +1123,8 @@ class MeroUploadManager {
 
 export const meroUpload = new MeroUploadManager();
 window.meroUpload = meroUpload;
+window.openUploadModal = () => meroUpload.handleUploadTrigger();
+window.closeUploadModal = () => meroUpload.closeModal();
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {

@@ -32,6 +32,16 @@ class MeroPlayerController {
     this.userInactivityTimer = null;
     this.lastTapTime = 0;
     this.lastTapX = 0;
+
+    // HLS.js instance for Bunny Stream .m3u8 playback on Chrome/Firefox
+    this._hlsInstance = null;
+
+    // Video Storyboard / Timeline Frame Preview Strip
+    this.storyboardStrip = null;
+    this.storyboardTrack = null;
+    this.storyboardScrollLeft = null;
+    this.storyboardScrollRight = null;
+    this._storyboardCards = [];
   }
 
   init() {
@@ -55,8 +65,15 @@ class MeroPlayerController {
     this.volumeSlider = document.getElementById("playerVolumeSlider");
     this.volumeBtn = document.getElementById("playerVolumeBtn");
 
+    // Video Storyboard Preview Strip Elements
+    this.storyboardStrip = document.getElementById("videoStoryboardStrip");
+    this.storyboardTrack = document.getElementById("storyboardTrack");
+    this.storyboardScrollLeft = document.getElementById("storyboardScrollLeft");
+    this.storyboardScrollRight = document.getElementById("storyboardScrollRight");
+
     this.bindEvents();
     this.bindMiniPlayerEvents();
+    this.bindStoryboardEvents();
   }
 
   bindEvents() {
@@ -70,6 +87,14 @@ class MeroPlayerController {
     this.videoEl.addEventListener("waiting", () => this.playerWrap.classList.add("is-buffering"));
     this.videoEl.addEventListener("canplay", () => this.playerWrap.classList.remove("is-buffering"));
     this.videoEl.addEventListener("ended", () => this.onVideoEnded());
+    this.videoEl.addEventListener("loadedmetadata", () => {
+      if (this.currentVideo) {
+        if (this.videoEl.duration && (!this.currentVideo.duration || Math.abs(this.currentVideo.duration - this.videoEl.duration) > 1)) {
+          this.currentVideo.duration = this.videoEl.duration;
+        }
+        this.updateStoryboardAspectRatio();
+      }
+    });
 
     // Play/Pause button clicks
     if (this.playBtn) this.playBtn.addEventListener("click", () => this.togglePlay());
@@ -181,6 +206,8 @@ class MeroPlayerController {
                     /youtube|youtu\.be|vimeo|dailymotion|embed/i.test(video.videoSrc || "");
 
     if (isEmbed && this.iframeEl) {
+      // Destroy any active HLS instance before switching to iframe mode
+      this._destroyHls();
       if (this.playerWrap) this.playerWrap.classList.add("is-iframe-mode");
       if (this.videoEl) {
         this.videoEl.pause();
@@ -199,14 +226,102 @@ class MeroPlayerController {
       }
       if (this.videoEl) {
         this.videoEl.style.display = "block";
-        this.videoEl.src = video.videoSrc;
-        this.videoEl.poster = video.thumbnail;
-        this.videoEl.load();
+        this.videoEl.poster = video.thumbnail || "";
 
-        if (autoPlay) {
-          this.videoEl.play().catch(() => {
-            // Auto-play was prevented by browser policy
-          });
+        let src = video.videoSrc || "";
+        // Auto-fix legacy invalid Bunny CDN hostname if present
+        if (src.includes("vz-759040.b-cdn.net")) {
+          src = src.replace("vz-759040.b-cdn.net", "vz-95ca6a68-303.b-cdn.net");
+          video.videoSrc = src;
+        }
+        if (video.thumbnail && video.thumbnail.includes("vz-759040.b-cdn.net")) {
+          video.thumbnail = video.thumbnail.replace("vz-759040.b-cdn.net", "vz-95ca6a68-303.b-cdn.net");
+        }
+
+        const isHls = /\.m3u8(\?|$)/i.test(src);
+
+        if (isHls) {
+          // ── HLS Stream (Bunny.net Stream) ──────────────────────────
+          if (this.videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+            // Safari: native HLS support
+            this._destroyHls();
+            this.videoEl.src = src;
+            this.videoEl.load();
+            if (autoPlay) {
+              this.videoEl.play().catch(() => {});
+            }
+          } else {
+            // Chrome / Firefox / Edge: use HLS.js
+            this._loadHlsJs().then((Hls) => {
+              this._destroyHls();
+              if (Hls && Hls.isSupported()) {
+                this._hlsInstance = new Hls({
+                  startLevel: -1,          // Automatic initial resolution based on network
+                  enableWorker: true,       // Web Worker thread for stutter-free 60fps video
+                  lowLatencyMode: false,
+                  backBufferLength: 90,     // Buffer 90s behind for instant seek back
+                  maxBufferLength: 30,      // Buffer 30s ahead for ultra-smooth playback
+                  maxMaxBufferLength: 600,
+                  maxBufferSize: 60 * 1000 * 1000,
+                  maxBufferHole: 0.5,
+                  highBufferWatchdogPeriod: 2,
+                  nudgeOffset: 0.1,
+                  nudgeMaxRetry: 5
+                });
+
+                this._hlsInstance.loadSource(src);
+                this._hlsInstance.attachMedia(this.videoEl);
+
+                this._hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                  if (autoPlay) {
+                    this.videoEl.play().catch(err => {
+                      console.warn("AutoPlay prevented by browser policy:", err);
+                    });
+                  }
+                });
+
+                // Robust error handling and fallback
+                this._hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                  if (data.fatal) {
+                    console.warn("HLS fatal error:", data.type, data.details);
+                    switch (data.type) {
+                      case Hls.ErrorTypes.NETWORK_ERROR:
+                        if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                            data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
+                          // Playlist not accessible or transcoding in progress — seamlessly switch to embed player
+                          console.warn("Playlist not ready, falling back to embed player");
+                          this._fallbackToIframe(video);
+                        } else {
+                          this._hlsInstance.startLoad();
+                        }
+                        break;
+                      case Hls.ErrorTypes.MEDIA_ERROR:
+                        this._hlsInstance.recoverMediaError();
+                        break;
+                      default:
+                        this._destroyHls();
+                        this._fallbackToIframe(video);
+                        break;
+                    }
+                  }
+                });
+              } else {
+                this._fallbackToIframe(video);
+              }
+            }).catch(err => {
+              console.error("Failed to initialize hls.js:", err);
+              this._fallbackToIframe(video);
+            });
+            return; // early return — hls.js handles playback
+          }
+        } else {
+          // ── Direct video file (MP4 / WebM / blob URL) ────────────────
+          this._destroyHls();
+          this.videoEl.src = src;
+          this.videoEl.load();
+          if (autoPlay) {
+            this.videoEl.play().catch(() => {});
+          }
         }
       }
     }
@@ -214,11 +329,54 @@ class MeroPlayerController {
     // Build scrubber chapter tick marks
     this.renderChapterMarkers(video.chapters || [], video.duration);
 
+    // Build timeline frame preview storyboard strip
+    this.renderStoryboardPreview(video);
+
     // Save into watch history
     window.meroStore.recordHistory(video.id, 0);
 
     // Sync miniplayer
     this.updateMiniPlayerDetails(video);
+  }
+
+  /** Destroy any active hls.js instance and free memory. */
+  _destroyHls() {
+    if (this._hlsInstance) {
+      this._hlsInstance.destroy();
+      this._hlsInstance = null;
+    }
+  }
+
+  /** Seamless fallback to iframe embed if HLS is unavailable or transcoding. */
+  _fallbackToIframe(video) {
+    const fallbackUrl = video?.originalUrl || 
+      (video?.storagePath ? `https://iframe.mediadelivery.net/embed/759040/${video.storagePath}?autoplay=true&loop=false&muted=false&preload=true` : null);
+    if (this.iframeEl && fallbackUrl) {
+      this._destroyHls();
+      if (this.playerWrap) this.playerWrap.classList.add("is-iframe-mode");
+      if (this.videoEl) {
+        this.videoEl.pause();
+        this.videoEl.style.display = "none";
+      }
+      this.iframeEl.style.display = "block";
+      this.iframeEl.src = fallbackUrl;
+    }
+  }
+
+  /**
+   * Lazily load hls.js from CDN and return the Hls constructor.
+   * Cached after first load so subsequent calls are instant.
+   * @returns {Promise<typeof Hls>}
+   */
+  _loadHlsJs() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+      script.onload = () => resolve(window.Hls);
+      script.onerror = () => reject(new Error("Failed to load hls.js"));
+      document.head.appendChild(script);
+    });
   }
 
   drawThumbnailAmbientGlow(thumbUrl) {
@@ -249,6 +407,9 @@ class MeroPlayerController {
 
     // Sync active chapter highlighting
     this.syncActiveChapter(cur);
+
+    // Sync active storyboard preview frame
+    this.syncActiveStoryboard(cur);
 
     // Record progress in store every 5 seconds
     if (Math.floor(cur) % 5 === 0 && this.currentVideo) {
@@ -288,7 +449,7 @@ class MeroPlayerController {
   togglePlay() {
     if (!this.videoEl) return;
     if (this.videoEl.paused) {
-      this.videoEl.play();
+      this.videoEl.play().catch(err => console.warn("Playback error:", err));
     } else {
       this.videoEl.pause();
     }
@@ -298,6 +459,53 @@ class MeroPlayerController {
     if (!this.videoEl) return;
     this.videoEl.currentTime = Math.max(0, Math.min(this.videoEl.duration || 999, this.videoEl.currentTime + deltaSeconds));
     this.showGestureIndicator(deltaSeconds > 0 ? "right" : "left", `${deltaSeconds > 0 ? "+" : ""}${deltaSeconds}s`);
+  }
+
+  handleGestureTap(e) {
+    // Ignore clicks on buttons, links, or scrubber
+    if (e.target.closest("button") || e.target.closest("a") || e.target.closest(".scrubber-wrap")) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const widthRatio = clickX / rect.width;
+
+    const now = Date.now();
+    if (this._lastTapTime && (now - this._lastTapTime) < 300) {
+      // Double tap detected: skip backwards or forwards
+      clearTimeout(this._singleTapTimeout);
+      this._singleTapTimeout = null;
+      this._lastTapTime = 0;
+
+      if (widthRatio < 0.35) {
+        this.seekRelative(-10);
+      } else if (widthRatio > 0.65) {
+        this.seekRelative(10);
+      } else {
+        this.togglePlay();
+      }
+    } else {
+      // Single tap candidate: toggle play/pause smoothly
+      this._lastTapTime = now;
+      this._singleTapTimeout = setTimeout(() => {
+        this._singleTapTimeout = null;
+        this.togglePlay();
+      }, 250);
+    }
+  }
+
+  showGestureIndicator(side, text) {
+    const el = document.getElementById(side === "right" ? "gestureRight" : "gestureLeft");
+    if (!el) return;
+    const label = el.querySelector(".gesture-label");
+    if (label && text) label.textContent = text;
+    el.style.display = "flex";
+    el.style.animation = "none";
+    void el.offsetWidth; // Trigger reflow to restart pulse
+    el.style.animation = "popPulse 0.5s ease-out";
+    clearTimeout(this[`_gestTimer_${side}`]);
+    this[`_gestTimer_${side}`] = setTimeout(() => {
+      el.style.display = "none";
+    }, 500);
   }
 
   seekTo(seconds) {
@@ -406,6 +614,274 @@ class MeroPlayerController {
     });
   }
 
+  // --- Storyboard Timeline Preview Strip ---
+  bindStoryboardEvents() {
+    if (this.storyboardScrollLeft) {
+      this.storyboardScrollLeft.addEventListener("click", () => this.scrollStoryboard(-260));
+    }
+    if (this.storyboardScrollRight) {
+      this.storyboardScrollRight.addEventListener("click", () => this.scrollStoryboard(260));
+    }
+    if (this.storyboardTrack) {
+      this.storyboardTrack.addEventListener("wheel", (e) => {
+        if (e.deltaY !== 0) {
+          e.preventDefault();
+          this.storyboardTrack.scrollLeft += e.deltaY;
+        }
+      }, { passive: false });
+    }
+  }
+
+  scrollStoryboard(distance) {
+    if (this.storyboardTrack) {
+      this.storyboardTrack.scrollBy({ left: distance, behavior: "smooth" });
+    }
+  }
+
+  renderStoryboardPreview(video) {
+    if (!this.storyboardTrack || !video) return;
+    this.storyboardTrack.innerHTML = "";
+    this._storyboardCards = [];
+
+    const dur = Math.max(1, video.duration || this.videoEl?.duration || 32);
+
+    // Detect aspect ratio from actual video element if metadata loaded
+    const hasVideoDims = this.videoEl && this.videoEl.videoWidth > 0 && this.videoEl.videoHeight > 0;
+    const isVideoPortrait = hasVideoDims
+      ? (this.videoEl.videoHeight > this.videoEl.videoWidth)
+      : (video.isPortrait || false);
+    const videoRatio = hasVideoDims
+      ? (this.videoEl.videoWidth / this.videoEl.videoHeight)
+      : (isVideoPortrait ? (9 / 16) : (16 / 9));
+
+    const isBunny = video.storageType === "bunny_stream" || 
+                    (video.videoSrc && /vz-[a-zA-Z0-9-]+\.b-cdn\.net/i.test(video.videoSrc));
+
+    if (isBunny) {
+      let guid = video.storagePath;
+      if (!guid && video.videoSrc) {
+        const match = video.videoSrc.match(/https:\/\/[^/]+\/([a-f0-9-]+)\//i);
+        if (match) guid = match[1];
+      }
+      const cdnHost = video.videoSrc ? new URL(video.videoSrc).origin : "https://vz-95ca6a68-303.b-cdn.net";
+
+      if (guid) {
+        const seekUrl = `${cdnHost}/${guid}/seek/_0.jpg`;
+        // Bunny seek sprite grid: 6 columns × 6 rows
+        const COLS = 6;
+        const ROWS = 6;
+        const totalFrames = video.seekPicNum || 16;
+
+        // Probe the sprite image to extract exact cell aspect ratio from the image itself
+        const probeImg = new Image();
+        probeImg.crossOrigin = "anonymous";
+        probeImg.onload = () => {
+          const naturalW = probeImg.naturalWidth || 1800;
+          const naturalH = probeImg.naturalHeight || Math.round(naturalW * 16 / 9);
+          const cellW = naturalW / COLS;
+          const cellH = naturalH / ROWS;
+          const cellIsPortrait = cellH > cellW;
+          const cellRatio = cellW / cellH;
+
+          // Clear any placeholder cards before building
+          this.storyboardTrack.innerHTML = "";
+          this._storyboardCards = [];
+
+          // Exactly 6 timeline preview frames for every video
+          const TARGET_FRAMES = 6;
+          const availableFrames = Math.min(36, video.seekPicNum || 16);
+
+          for (let k = 0; k < TARGET_FRAMES; k++) {
+            const frameIndex = Math.min(
+              availableFrames - 1,
+              Math.round((k / (TARGET_FRAMES - 1)) * (availableFrames - 1))
+            );
+            const time = (k / (TARGET_FRAMES - 1)) * dur;
+            const col = frameIndex % COLS;
+            const row = Math.floor(frameIndex / COLS);
+
+            const card = document.createElement("div");
+            card.className = "storyboard-card" +
+              (k === 0 ? " is-active" : "") +
+              (cellIsPortrait ? " is-portrait" : "");
+            card.dataset.time = time.toFixed(2);
+            card.dataset.index = k;
+            card.dataset.sprite = "true";
+            card.style.aspectRatio = `${cellRatio}`;
+            card.title = `Jump to ${this.formatTime(time)}`;
+
+            // Mathematically exact percentage offsets for 6x6 sprite sheet:
+            const bgSizeX = `${COLS * 100}%`;
+            const bgSizeY = `${ROWS * 100}%`;
+            const bgPosX = (col / (COLS - 1)) * 100;
+            const bgPosY = (row / (ROWS - 1)) * 100;
+
+            card.innerHTML = `
+              <div class="storyboard-thumb" style="
+                background-image: url('${seekUrl}');
+                background-size: ${bgSizeX} ${bgSizeY};
+                background-position: ${bgPosX}% ${bgPosY}%;
+                background-repeat: no-repeat;
+              "></div>
+              <span class="storyboard-time-badge">${this.formatTime(time)}</span>
+              <div class="storyboard-play-hint">
+                <svg class="icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              </div>
+            `;
+
+            card.addEventListener("click", () => {
+              this.seekTo(time);
+              if (this.videoEl && this.videoEl.paused) {
+                this.videoEl.play().catch(() => {});
+              }
+              this.setActiveStoryboardCard(card, false);
+              window.showToast(`Jumped to ${this.formatTime(time)}`);
+            });
+
+            this.storyboardTrack.appendChild(card);
+            this._storyboardCards.push({ element: card, time });
+          }
+
+          if (this.storyboardStrip) this.storyboardStrip.style.display = "flex";
+        };
+
+        probeImg.onerror = () => {
+          // Sprite not available — fallback to video thumbnail
+          this._renderDefaultStoryboard(video, dur, isVideoPortrait, videoRatio);
+        };
+
+        probeImg.src = seekUrl;
+        return;
+      }
+    }
+
+    // Fallback: chapters (limit to 6)
+    if (video.chapters && video.chapters.length > 1) {
+      const chList = video.chapters.length > 6 
+        ? [0, 1, 2, 3, 4, 5].map(idx => video.chapters[Math.round((idx / 5) * (video.chapters.length - 1))])
+        : video.chapters;
+      chList.forEach((ch, idx) => {
+        const card = document.createElement("div");
+        card.className = "storyboard-card" +
+          (idx === 0 ? " is-active" : "") +
+          (isVideoPortrait ? " is-portrait" : "");
+        card.dataset.time = ch.time;
+        card.style.aspectRatio = `${videoRatio}`;
+        card.title = `${ch.title} (${this.formatTime(ch.time)})`;
+
+        card.innerHTML = `
+          <div class="storyboard-thumb" style="
+            background-image: url('${video.thumbnail || ""}');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+          "></div>
+          <span class="storyboard-time-badge">${this.formatTime(ch.time)}</span>
+          <div class="storyboard-play-hint">
+            <svg class="icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          </div>
+        `;
+
+        card.addEventListener("click", () => {
+          this.seekTo(ch.time);
+          if (this.videoEl && this.videoEl.paused) {
+            this.videoEl.play().catch(() => {});
+          }
+          this.setActiveStoryboardCard(card, false);
+          window.showToast(`Jumped to ${ch.title} (${this.formatTime(ch.time)})`);
+        });
+
+        this.storyboardTrack.appendChild(card);
+        this._storyboardCards.push({ element: card, time: ch.time });
+      });
+      if (this.storyboardStrip) this.storyboardStrip.style.display = "flex";
+      return;
+    }
+
+    this._renderDefaultStoryboard(video, dur, isVideoPortrait, videoRatio);
+  }
+
+  _renderDefaultStoryboard(video, dur, isPortrait, ratio) {
+    const frameCount = 6;
+    const finalRatio = ratio || (isPortrait ? (9 / 16) : (16 / 9));
+    for (let i = 0; i < frameCount; i++) {
+      const time = (i / (frameCount > 1 ? (frameCount - 1) : 1)) * dur;
+      const card = document.createElement("div");
+      card.className = "storyboard-card" +
+        (i === 0 ? " is-active" : "") +
+        (isPortrait ? " is-portrait" : "");
+      card.dataset.time = time.toFixed(2);
+      card.style.aspectRatio = `${finalRatio}`;
+      card.title = `Jump to ${this.formatTime(time)}`;
+
+      card.innerHTML = `
+        <div class="storyboard-thumb" style="
+          background-image: url('${video.thumbnail || ""}');
+          background-size: cover;
+          background-position: center;
+          background-repeat: no-repeat;
+        "></div>
+        <span class="storyboard-time-badge">${this.formatTime(time)}</span>
+        <div class="storyboard-play-hint">
+          <svg class="icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        </div>
+      `;
+
+      card.addEventListener("click", () => {
+        this.seekTo(time);
+        if (this.videoEl && this.videoEl.paused) {
+          this.videoEl.play().catch(() => {});
+        }
+        this.setActiveStoryboardCard(card, false);
+        window.showToast(`Jumped to ${this.formatTime(time)}`);
+      });
+
+      this.storyboardTrack.appendChild(card);
+      this._storyboardCards.push({ element: card, time });
+    }
+    if (this.storyboardStrip) this.storyboardStrip.style.display = "flex";
+  }
+
+  updateStoryboardAspectRatio() {
+    if (!this.videoEl || !this.videoEl.videoWidth || !this.videoEl.videoHeight) return;
+    const isPortrait = this.videoEl.videoHeight > this.videoEl.videoWidth;
+    const ratio = this.videoEl.videoWidth / this.videoEl.videoHeight;
+    if (this.storyboardTrack) {
+      this.storyboardTrack.querySelectorAll(".storyboard-card:not([data-sprite])").forEach(card => {
+        card.style.aspectRatio = `${ratio}`;
+        card.classList.toggle("is-portrait", isPortrait);
+      });
+    }
+  }
+
+  syncActiveStoryboard(currentTime) {
+    if (!this._storyboardCards || this._storyboardCards.length === 0) return;
+
+    let activeIndex = 0;
+    for (let i = 0; i < this._storyboardCards.length; i++) {
+      if (currentTime >= this._storyboardCards[i].time) {
+        activeIndex = i;
+      } else {
+        break;
+      }
+    }
+
+    const target = this._storyboardCards[activeIndex];
+    if (target && !target.element.classList.contains("is-active")) {
+      this.setActiveStoryboardCard(target.element, true);
+    }
+  }
+
+  setActiveStoryboardCard(card, autoScroll = true) {
+    if (!this.storyboardTrack || !card) return;
+    this.storyboardTrack.querySelectorAll(".storyboard-card").forEach(c => {
+      c.classList.toggle("is-active", c === card);
+    });
+    if (autoScroll) {
+      card.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+    }
+  }
+
   // --- Volume & UI ---
   updateVolumeUI() {
     if (!this.videoEl) return;
@@ -498,7 +974,11 @@ class MeroPlayerController {
     if (document.pictureInPictureElement) {
       document.exitPictureInPicture();
     } else if (document.pictureInPictureEnabled && this.videoEl) {
-      this.videoEl.requestPictureInPicture().catch(err => console.warn(err));
+      if (this.videoEl.readyState < 1) {
+        window.showToast("Video is still loading...");
+        return;
+      }
+      this.videoEl.requestPictureInPicture().catch(err => console.warn("PiP error:", err));
     }
   }
 

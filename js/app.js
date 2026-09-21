@@ -26,6 +26,58 @@ window.showToast = function(message) {
   }, 3800);
 };
 
+// Global Fallback Handlers for Modals
+// Defined early (before ES modules load) so inline onclick handlers always work.
+// auth.js & upload.js will override these with the real implementations.
+window.openAuthModal = function(reason, callback) {
+  const modal = document.getElementById("authModal");
+  if (!modal) return;
+  const reasonEl = document.getElementById("authModalReason");
+  if (reasonEl && reason) reasonEl.textContent = reason;
+  modal.classList.add("active");
+  document.body.classList.add("modal-open");
+  // Store callback for when auth.js picks it up
+  window._pendingAuthCallback = callback || null;
+};
+
+window.closeAuthModal = function() {
+  const modal = document.getElementById("authModal");
+  if (modal) {
+    modal.classList.remove("active");
+    document.body.classList.remove("modal-open");
+  }
+};
+
+// Called by ALL upload buttons. Delegates to the auth-aware handler.
+window.openUploadModal = function() {
+  if (window.meroUpload && typeof window.meroUpload.handleUploadTrigger === "function") {
+    window.meroUpload.handleUploadTrigger();
+    return;
+  }
+  // meroUpload not ready yet — open auth modal as the safe fallback
+  if (window.meroAuth && window.meroAuth.currentUser) {
+    const modal = document.getElementById("uploadModal");
+    if (modal) {
+      modal.classList.add("active");
+      document.body.classList.add("modal-open");
+    }
+  } else {
+    window.openAuthModal("Sign in to upload and share your videos on Mero.");
+  }
+};
+
+window.closeUploadModal = function() {
+  if (window.meroUpload && typeof window.meroUpload.closeModal === "function") {
+    window.meroUpload.closeModal();
+    return;
+  }
+  const modal = document.getElementById("uploadModal");
+  if (modal) {
+    modal.classList.remove("active");
+    document.body.classList.remove("modal-open");
+  }
+};
+
 class MeroApp {
   constructor() {
     this.currentView = "home";
@@ -136,14 +188,18 @@ class MeroApp {
               <p class="empty-state-text">
                 Don't miss new videos from creators you follow. Sign in to access your channel subscriptions feed.
               </p>
-              <button class="btn-empty-action" id="subsGateSignInBtn">
+              <button class="btn-empty-action" id="subsGateSignInBtn" onclick="window.openAuthModal ? window.openAuthModal('Sign in to access your channel subscriptions.') : window.meroAuth?.openAuthModal('Sign in to access your channel subscriptions.')">
                 <svg class="icon" style="width: 18px; height: 18px; stroke: #fff;" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
                 <span>Sign In to Access</span>
               </button>
             </div>
           `;
           document.getElementById("subsGateSignInBtn")?.addEventListener("click", () => {
-            window.meroAuth?.openAuthModal("Sign in to access your channel subscriptions.");
+            if (typeof window.openAuthModal === "function") {
+              window.openAuthModal("Sign in to access your channel subscriptions.");
+            } else if (window.meroAuth?.openAuthModal) {
+              window.meroAuth.openAuthModal("Sign in to access your channel subscriptions.");
+            }
           });
         }
         return;
@@ -183,14 +239,18 @@ class MeroApp {
               <p class="empty-state-text">
                 Save videos from any device and watch them whenever you're ready. Sign in to view your personalized Watch Later list.
               </p>
-              <button class="btn-empty-action" id="libraryGateSignInBtn">
+              <button class="btn-empty-action" id="libraryGateSignInBtn" onclick="window.openAuthModal ? window.openAuthModal('Sign in to access your Watch Later playlist.') : window.meroAuth?.openAuthModal('Sign in to access your Watch Later playlist.')">
                 <svg class="icon" style="width: 18px; height: 18px; stroke: #fff;" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
                 <span>Sign In to Access Playlist</span>
               </button>
             </div>
           `;
           document.getElementById("libraryGateSignInBtn")?.addEventListener("click", () => {
-            window.meroAuth?.openAuthModal("Sign in to access your Watch Later playlist.");
+            if (typeof window.openAuthModal === "function") {
+              window.openAuthModal("Sign in to access your Watch Later playlist.");
+            } else if (window.meroAuth?.openAuthModal) {
+              window.meroAuth.openAuthModal("Sign in to access your Watch Later playlist.");
+            }
           });
         }
         return;
@@ -242,6 +302,32 @@ class MeroApp {
     // Title
     const titleEl = document.getElementById("watchVideoTitle");
     if (titleEl) titleEl.textContent = video.title;
+
+    // Tags
+    const tagsContainer = document.getElementById("watchVideoTags");
+    if (tagsContainer) {
+      tagsContainer.innerHTML = "";
+      const rawTags = Array.isArray(video.tags) ? video.tags : [];
+      const cleanTags = rawTags.map(t => String(t).replace(/^#+/, "").trim()).filter(Boolean);
+
+      if (cleanTags.length > 0) {
+        cleanTags.forEach(tag => {
+          const btn = document.createElement("button");
+          btn.className = "video-tag-pill";
+          btn.type = "button";
+          btn.textContent = `#${tag}`;
+          btn.title = `Search videos tagged with #${tag}`;
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.searchByTag(tag);
+          });
+          tagsContainer.appendChild(btn);
+        });
+        tagsContainer.style.display = "flex";
+      } else {
+        tagsContainer.style.display = "none";
+      }
+    }
 
     // Creator profile
     const avatarEl = document.getElementById("watchCreatorAvatar");
@@ -374,6 +460,30 @@ class MeroApp {
         window.meroFeed.setSearchQuery(input.value);
       });
     }
+  }
+
+  // --- Tag-based Search & Navigation ---
+  searchByTag(tag) {
+    if (!tag) return;
+    const clean = String(tag).replace(/^#+/, "").trim();
+    if (!clean) return;
+
+    this.navigateTo("home");
+
+    const searchInput = document.getElementById("searchInput");
+    const clearBtn = document.getElementById("searchClearBtn");
+    if (searchInput) {
+      searchInput.value = `#${clean}`;
+      if (clearBtn) clearBtn.classList.add("active");
+    }
+
+    if (window.meroFeed) {
+      window.meroFeed.activeCategory = `#${clean}`;
+      window.meroFeed.updateActiveChipUI();
+      window.meroFeed.setSearchQuery(clean);
+    }
+
+    window.showToast(`Showing videos tagged with #${clean}`);
   }
 
   // --- Sleep Timer Modal ---

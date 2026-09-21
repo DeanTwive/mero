@@ -26,6 +26,9 @@
   </script>
   <script type="module" src="js/firebase.js"></script>
 
+  <!-- HLS.js for smooth adaptive bitrate streaming -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+
   <!-- Modular CSS Architecture -->
   <link rel="stylesheet" href="css/design-tokens.css" />
   <link rel="stylesheet" href="css/base.css" />
@@ -73,15 +76,9 @@
 
       <!-- Header Actions -->
       <div class="header-actions">
-        <!-- Top Bar Upload Button -->
-        <button class="top-upload-btn" id="topUploadBtn" title="Upload Video" aria-label="Upload Video">
-          <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-          <span class="upload-btn-text">Upload</span>
-        </button>
-
         <!-- User Profile / Account Button (Default user icon, click to pop up login) -->
         <div class="user-profile-wrapper" id="userProfileMenu">
-          <button class="avatar-btn" id="userAvatarBtn" title="Sign In" aria-label="Sign In or Account">
+          <button class="avatar-btn" id="userAvatarBtn" onclick="if (!window.meroAuth?.currentUser) { window.openAuthModal ? window.openAuthModal() : window.meroAuth?.openAuthModal(); }" title="Sign In" aria-label="Sign In or Account">
             <svg class="avatar-user-icon" id="defaultUserIcon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
               <circle cx="12" cy="7" r="4"></circle>
@@ -96,12 +93,12 @@
             </div>
             <div class="dropdown-divider"></div>
             <!-- Guest Action: Sign In -->
-            <button class="dropdown-item guest-only" id="dropdownGuestSignInBtn" onclick="window.meroAuth?.openAuthModal()" style="color: var(--color-accent); font-weight: 700;">
+            <button class="dropdown-item guest-only" id="dropdownGuestSignInBtn" onclick="window.openAuthModal ? window.openAuthModal() : window.meroAuth?.openAuthModal()" style="color: var(--color-accent); font-weight: 700;">
               <svg class="icon" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
               <span>Sign In / Register</span>
             </button>
             <!-- Member Actions -->
-            <button class="dropdown-item member-only" id="dropdownUploadBtn" onclick="window.meroUpload?.handleUploadTrigger()" style="display: none;">
+            <button class="dropdown-item member-only" id="dropdownUploadBtn" onclick="window.openUploadModal ? window.openUploadModal() : window.meroUpload?.handleUploadTrigger()" style="display: none;">
               <svg class="icon" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
               <span>Upload Video</span>
             </button>
@@ -147,7 +144,7 @@
             <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
             <span>Watch Later</span>
           </a>
-          <button type="button" class="nav-link studio-sidebar-link" id="sidebarStudioBtn" onclick="window.meroUpload?.handleUploadTrigger()" style="background: none; border: none; width: 100%; text-align: left; cursor: pointer;">
+          <button type="button" class="nav-link studio-sidebar-link" id="sidebarStudioBtn" onclick="window.openUploadModal ? window.openUploadModal() : (window.meroUpload ? window.meroUpload.handleUploadTrigger() : window.openAuthModal?.('Sign in to upload videos'))" style="background: none; border: none; width: 100%; text-align: left; cursor: pointer;">
             <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
             <span>Upload Studio</span>
           </button>
@@ -212,9 +209,6 @@
 
                     <!-- Center Gestures Zone & Double-Tap Skip -->
                     <div class="center-gesture-zone" id="centerGestureZone">
-                      <button class="big-play-btn" id="playerBigPlayBtn" aria-label="Play/Pause">
-                        <svg class="icon" style="width: 28px; height: 28px; fill: #ffffff; stroke: none;" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                      </button>
                       <div class="buffering-spinner"></div>
                       
                       <!-- Double-Tap Ripple Indicators for Mobile -->
@@ -304,6 +298,28 @@
                 </div>
               </div>
 
+              <!-- Video Storyboard Visual Preview Strip -->
+              <div class="video-storyboard-preview-strip" id="videoStoryboardStrip">
+                <div class="storyboard-header">
+                  <div class="storyboard-title-row">
+                    <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
+                    <span>Timeline Preview</span>
+                  </div>
+                  <span class="storyboard-hint">Click any frame to jump</span>
+                </div>
+                <div class="storyboard-track-wrap">
+                  <button class="storyboard-scroll-btn left" id="storyboardScrollLeft" title="Scroll left" aria-label="Scroll left">
+                    <svg class="icon" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                  </button>
+                  <div class="storyboard-track" id="storyboardTrack">
+                    <!-- Dynamic storyboard preview cards injected here -->
+                  </div>
+                  <button class="storyboard-scroll-btn right" id="storyboardScrollRight" title="Scroll right" aria-label="Scroll right">
+                    <svg class="icon" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                  </button>
+                </div>
+              </div>
+
               <!-- Mobile Quick Access Bar for Chapters & Comments -->
               <div style="display: flex; gap: 8px; margin-top: 4px;" class="mobile-only-quick-tabs">
                 <button class="action-pill-btn" id="mobileOpenChaptersBtn" style="flex: 1;">
@@ -319,6 +335,8 @@
               <!-- Video Title & Details -->
               <div class="video-headline-wrap">
                 <h1 class="watch-video-title" id="watchVideoTitle">Video Title</h1>
+                <!-- Clickable Video Tags Row -->
+                <div class="watch-video-tags" id="watchVideoTags"></div>
 
                 <!-- Creator Bar & Engagement Actions -->
                 <div class="watch-creator-actions-bar">
@@ -431,7 +449,7 @@
         <svg class="icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
         <span>Trending</span>
       </button>
-      <button class="bottom-bar-item bottom-bar-create-btn" id="mobileUploadBtn" aria-label="Upload Video">
+      <button class="bottom-bar-item bottom-bar-create-btn" id="mobileUploadBtn" onclick="window.openUploadModal ? window.openUploadModal() : (window.meroUpload ? window.meroUpload.handleUploadTrigger() : window.openAuthModal?.('Sign in to upload videos'))" aria-label="Upload Video">
         <div class="create-btn-circle">
           <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
         </div>
@@ -481,7 +499,7 @@
             </div>
             <span class="brand-text" style="font-size: 1.25rem;">Mero Account</span>
           </div>
-          <button class="drawer-close-btn" id="authModalCloseBtn" aria-label="Close modal">
+          <button class="drawer-close-btn" id="authModalCloseBtn" onclick="window.closeAuthModal ? window.closeAuthModal() : window.meroAuth?.closeAuthModal()" aria-label="Close modal">
             <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
@@ -558,7 +576,7 @@
               <span class="subtitle" style="font-size: 0.75rem; margin: 0;" id="studioModalSubtitle">Upload a video or stream via external link</span>
             </div>
           </div>
-          <button class="drawer-close-btn" id="uploadModalCloseBtn" aria-label="Close studio modal" style="flex-shrink: 0;">
+          <button class="drawer-close-btn" id="uploadModalCloseBtn" onclick="window.closeUploadModal ? window.closeUploadModal() : window.meroUpload?.closeModal()" aria-label="Close studio modal" style="flex-shrink: 0;">
             <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
@@ -632,10 +650,10 @@
             <div class="embed-legal-notice">
               <div class="legal-notice-header">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                <span>Zero-Host Iframe Protocol & Rights</span>
+                <span>Zero-Host Iframe Protocol</span>
               </div>
               <p class="legal-notice-text">
-                Videos stream directly from their original third-party hosts via <code>&lt;iframe&gt;</code>. Mero never stores, re-hosts, or takes ownership of media files, ensuring full copyright compliance and zero file liability.
+                Videos stream directly from original host via <code>&lt;iframe&gt;</code> without local re-hosting.
               </p>
             </div>
 
@@ -652,7 +670,7 @@
                 placeholder="e.g. https://www.youtube.com/watch?v=... or https://vimeo.com/..." 
                 autocomplete="off" 
               />
-              <span class="input-subhint" id="urlSubhint">Supports YouTube, Vimeo, Dailymotion, or public iframe embed streams</span>
+              <span class="input-subhint" id="urlSubhint">Supports YouTube, Vimeo, Dailymotion</span>
             </div>
           </div>
 
@@ -662,34 +680,61 @@
             <input type="text" id="uploadTitle" class="form-input" placeholder="Enter video title" maxlength="120" required />
           </div>
 
-          <!-- Category & Thumbnail Two-Column Row -->
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label class="form-label" for="uploadCategory">Category</label>
-              <select id="uploadCategory" class="form-input" style="background: var(--bg-surface-2);">
-                <option value="Coding">Coding</option>
-                <option value="Tech">Tech</option>
-                <option value="Design">Design</option>
-                <option value="AI">AI & Machine Learning</option>
-                <option value="Lo-Fi">Lo-Fi & Music</option>
-                <option value="Gaming">Gaming</option>
-                <option value="General">General</option>
-              </select>
+          <!-- 1. Choose Thumbnail: 6 Image Previews from Video -->
+          <div class="form-group thumbnail-picker-section" id="thumbnailPickerSection">
+            <div class="thumbnail-picker-header">
+              <label class="form-label" style="margin-bottom: 0;">Thumbnail *</label>
+              <button type="button" class="btn-text-action" id="toggleCustomThumbBtn">
+                + Custom URL
+              </button>
             </div>
-            <div class="form-group">
-              <label class="form-label" for="uploadThumbUrl">Thumbnail (Optional)</label>
-              <input type="url" id="uploadThumbUrl" class="form-input" placeholder="Auto-captured or custom URL" />
+
+            <!-- 6 Frame Previews Grid -->
+            <div class="thumbnail-previews-grid" id="thumbnailPreviewsGrid">
+              <div class="thumb-empty-hint" id="thumbEmptyHint">
+                <span>Select a video to generate preview thumbnails</span>
+              </div>
+            </div>
+
+            <!-- Optional Custom Image URL input -->
+            <div class="custom-thumb-url-wrap" id="customThumbUrlWrap" style="display: none; margin-top: 4px;">
+              <input type="url" id="uploadThumbUrl" class="form-input" placeholder="Paste custom image URL (https://...)" autocomplete="off" />
+            </div>
+          </div>
+
+          <!-- 2. Tags Selector: Direct Interactive Tag Chips + Custom Tags -->
+          <div class="form-group" id="tagsSelectorSection">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+              <label class="form-label" for="tagCustomInput" style="margin-bottom: 0;">Tags *</label>
+              <span class="selected-tags-count" id="selectedTagsCount" style="font-size: 11px; color: var(--color-accent); font-weight: 600;">0 selected</span>
+            </div>
+
+            <!-- Tag Input Field to add custom tags -->
+            <div class="tag-input-wrapper">
+              <svg class="icon tag-search-icon" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+              <input 
+                type="text" 
+                id="tagCustomInput" 
+                class="form-input tag-inline-input" 
+                placeholder="Add tag (press Enter)..." 
+                autocomplete="off"
+              />
+            </div>
+
+            <!-- Tags List (Selected tags show active here directly) -->
+            <div class="available-tags-list" id="availableTagsList">
+              <span style="font-size: 11px; color: var(--text-dimmed); font-style: italic;">Loading tags...</span>
             </div>
           </div>
 
           <!-- Description -->
           <div class="form-group">
-            <label class="form-label" for="uploadDescription">Description & Timestamps</label>
-            <textarea id="uploadDescription" class="form-input" rows="2" placeholder="Video summary or timestamps like '00:00 Intro' for interactive chapters"></textarea>
+            <label class="form-label" for="uploadDescription">Description (Optional)</label>
+            <textarea id="uploadDescription" class="form-input" rows="2" placeholder="Add video description or timestamps..."></textarea>
           </div>
 
           <div class="upload-footer">
-            <button type="submit" class="btn-auth-submit" id="uploadSubmitBtn" style="width: 100%;">Upload & Publish Video</button>
+            <button type="submit" class="btn-auth-submit" id="uploadSubmitBtn" style="width: 100%;">Upload Video</button>
           </div>
         </form>
       </div>
