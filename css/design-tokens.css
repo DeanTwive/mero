@@ -1,0 +1,107 @@
+/* ==========================================================================
+   Mero Design Tokens
+   Strict 8pt/4pt Grid | WCAG AA Contrast | Multi-Layered Dark Surfaces
+   ========================================================================== */
+
+:root {
+  /* ------------------------------------------------------------------------
+     1. Surface & Background Color Tokens (Elevated Charcoal / Deep Slate)
+     ------------------------------------------------------------------------ */
+  --bg-app: #080b11;           /* Deepest background layer */
+  --bg-surface-0: #0d121c;     /* Base panels and sidebars */
+  --bg-surface-1: #131a29;     /* Default cards & secondary surfaces */
+  --bg-surface-2: #1a2337;     /* Hovered cards, search bar & inputs */
+  --bg-surface-3: #222d46;     /* Elevated modals, floating drawers, tooltips */
+  --bg-surface-active: #2b3856;/* Active button/chip backgrounds */
+
+  /* Glassmorphism & Translucencies */
+  --glass-bg: rgba(13, 18, 28, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-highlight: rgba(255, 255, 255, 0.14);
+  --glass-backdrop-blur: blur(16px);
+
+  /* ------------------------------------------------------------------------
+     2. Brand & Semantic Accent Tokens
+     ------------------------------------------------------------------------ */
+  --color-primary: #6366f1;       /* Indigo 500 - Electric, modern */
+  --color-primary-hover: #4f46e5; /* Indigo 600 */
+  --color-primary-glow: rgba(99, 102, 241, 0.28);
+  --color-accent: #06b6d4;        /* Cyan 500 - Vibrant highlight */
+  --color-accent-glow: rgba(6, 182, 212, 0.25);
+  
+  --color-danger: #f43f5e;        /* Rose 500 - Destructive / Like red */
+  --color-danger-subtle: rgba(244, 63, 94, 0.16);
+  --color-success: #10b981;       /* Emerald 500 */
+  --color-warning: #f59e0b;       /* Amber 500 */
+
+  /* ------------------------------------------------------------------------
+     3. Typography & Text Contrast (WCAG 2.1 AA Compliant)
+     ------------------------------------------------------------------------ */
+  --text-primary: #f8fafc;        /* High contrast primary titles (>= 12:1) */
+  --text-secondary: #cbd5e1;      /* Crisp secondary body (>= 7:1) */
+  --text-muted: #94a3b8;          /* Timestamps & sub-labels (>= 4.5:1) */
+  --text-dimmed: #64748b;         /* Icons and inactive indicators */
+  --text-inverse: #090d16;        /* Text on light / bright buttons */
+
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Typographic Scale */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.875rem;   /* 14px */
+  --text-base: 1rem;     /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.25rem;    /* 20px */
+  --text-2xl: 1.5rem;    /* 24px */
+  --text-3xl: 1.875rem;  /* 30px */
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ------------------------------------------------------------------------
+     4. Strict 8pt / 4pt Spacing System
+     ------------------------------------------------------------------------ */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;     /* Core minimum touch target scale */
+  --space-64: 64px;
+
+  /* ------------------------------------------------------------------------
+     5. Border Radius & Elevation
+     ------------------------------------------------------------------------ */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 10px 30px -5px rgba(0, 0, 0, 0.7);
+  --shadow-glow: 0 0 35px var(--color-primary-glow);
+
+  /* ------------------------------------------------------------------------
+     6. Motion & Transitions (150ms - 250ms Ergonomic Natural Curves)
+     ------------------------------------------------------------------------ */
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-normal: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-bounce: 350ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ------------------------------------------------------------------------
+     7. Layout Constraints & Ergonomics
+     ------------------------------------------------------------------------ */
+  --header-height: 64px;
+  --bottom-nav-height: 64px;
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 72px;
+  --touch-target: 48px;
+  --max-content-width: 1720px;
+}

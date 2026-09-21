@@ -1,0 +1,14 @@
+{
+  "name": "mero",
+  "version": "1.0.0",
+  "description": "Next-gen mobile-first dark video platform",
+  "main": "index.html",
+  "scripts": {
+    "start": "live-server --port=8085 --no-browser",
+    "dev": "live-server --port=8085 --no-browser"
+  },
+  "dependencies": {
+    "firebase": "^12.19.0",
+    "live-server": "^1.2.2"
+  }
+}
