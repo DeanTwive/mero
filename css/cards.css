@@ -106,6 +106,13 @@
   transform: translateX(0);
 }
 
+@media (max-width: 768px), (hover: none) {
+  .card-quick-actions {
+    opacity: 0.92;
+    transform: translateX(0);
+  }
+}
+
 .card-quick-btn {
   width: 34px;
   height: 34px;
@@ -128,6 +135,8 @@
 .card-quick-btn.saved {
   background: var(--color-accent);
   color: var(--text-inverse);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 10px var(--color-accent-glow);
 }
 
 /* Card Information Body */

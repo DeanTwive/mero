@@ -139,7 +139,52 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-12);
   padding: var(--space-12) var(--space-16);
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.player-top-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+  flex: 1;
+}
+
+.player-back-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: var(--radius-full);
+  background: rgba(13, 18, 28, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.player-back-btn:hover {
+  background: var(--bg-surface-2);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: scale(1.06);
+}
+
+.player-back-btn .icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
 }
 
 .player-video-title {
@@ -147,11 +192,55 @@
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.player-quick-save-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: var(--radius-full);
+  background: rgba(13, 18, 28, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.player-quick-save-btn:hover {
+  background: var(--bg-surface-2);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: scale(1.06);
+}
+
+.player-quick-save-btn.active {
+  background: linear-gradient(135deg, var(--color-accent), #0891b2);
+  color: #ffffff;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 14px var(--color-accent-glow);
+}
+
+.player-quick-save-btn .icon {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
 }
 
 .center-gesture-zone {
   position: absolute;
-  top: 0;
+  top: 50px;
   left: 0;
   right: 0;
   bottom: 60px;

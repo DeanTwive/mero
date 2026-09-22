@@ -161,10 +161,22 @@
       <!-- Main Feed & Video Content Viewport -->
       <main class="main-content" role="main">
         
-        <!-- Category Filter Chips Bar -->
-        <nav class="category-chips-bar" id="categoryChips" aria-label="Category Filters">
-          <!-- Populated by JS -->
-        </nav>
+        <!-- Feed Filter Toolbar with Burger Tag Explorer -->
+        <div class="feed-filter-bar" id="feedFilterBar">
+          <nav class="category-chips-bar" id="categoryChips" aria-label="Category Filters">
+            <!-- Populated by JS: All, Newest, Most viewed, Longest -->
+          </nav>
+          <div class="filter-bar-divider" aria-hidden="true"></div>
+          <button type="button" class="tags-burger-btn" id="tagsBurgerBtn" title="Explore all video tags" aria-label="Explore all video tags">
+            <svg class="icon burger-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+            <span class="tags-burger-label">Tags</span>
+            <span class="tags-active-dot" id="tagsActiveDot" style="display: none;"></span>
+          </button>
+        </div>
 
         <!-- VIEW 1: Video Grid Feed Section -->
         <section id="feedSection">
@@ -204,7 +216,17 @@
                   <!-- Player Overlay Controls -->
                   <div class="player-overlay" id="playerOverlay">
                     <div class="player-top-bar">
-                      <span class="player-video-title" id="playerVideoTitle">Loading Video...</span>
+                      <div class="player-top-left">
+                        <button type="button" class="player-back-btn" id="playerBackBtn" title="Back to feed" aria-label="Go back">
+                          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                          </svg>
+                        </button>
+                        <span class="player-video-title" id="playerVideoTitle">Loading Video...</span>
+                      </div>
+                      <button type="button" class="player-quick-save-btn" id="playerQuickSaveBtn" title="Save to Watch Later" aria-label="Save to Watch Later">
+                        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                      </button>
                     </div>
 
                     <!-- Center Gestures Zone & Double-Tap Skip -->
@@ -367,14 +389,14 @@
                       </button>
                     </div>
 
-                    <button class="action-pill-btn" id="watchShareBtn">
-                      <svg class="icon" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
-                      <span>Share</span>
-                    </button>
-
-                    <button class="action-pill-btn" id="watchSaveBtn">
+                    <button class="action-pill-btn" id="watchSaveBtn" title="Save to Watch Later" aria-label="Save to Watch Later">
                       <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                       <span>Save</span>
+                    </button>
+
+                    <button class="action-pill-btn" id="watchShareBtn" title="Share video" aria-label="Share video">
+                      <svg class="icon" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                      <span>Share</span>
                     </button>
                   </div>
                 </div>
@@ -738,6 +760,57 @@
           </div>
         </form>
       </div>
+    </div>
+
+    <!-- ====================================================================
+         10. Tags Explorer Side Drawer (Slide in from side on burger click)
+         ==================================================================== -->
+    <div class="tags-drawer-overlay" id="tagsDrawerOverlay" aria-hidden="true">
+      <div class="tags-drawer-backdrop" id="tagsDrawerBackdrop"></div>
+      <aside class="tags-drawer-panel" id="tagsDrawerPanel" role="dialog" aria-modal="true" aria-labelledby="tagsDrawerTitle">
+        <!-- Header -->
+        <div class="tags-drawer-header">
+          <div class="tags-drawer-title-wrap">
+            <div class="tags-drawer-icon-badge">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            </div>
+            <div>
+              <h2 class="tags-drawer-title" id="tagsDrawerTitle">Explore Tags</h2>
+              <span class="tags-drawer-subtitle" id="tagsDrawerCount">0 tags available</span>
+            </div>
+          </div>
+          <button type="button" class="drawer-close-btn" id="tagsDrawerCloseBtn" aria-label="Close tags drawer">
+            <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+
+        <!-- Search Tags Filter Input -->
+        <div class="tags-drawer-search-wrap">
+          <svg class="icon tags-search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" class="tags-drawer-search-input" id="tagsDrawerSearchInput" placeholder="Find tag..." autocomplete="off" />
+          <button type="button" class="tags-search-clear" id="tagsDrawerSearchClear" style="display: none;" aria-label="Clear tag search">
+            <svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+
+        <!-- Active Tag Banner (if any tag is active) -->
+        <div class="tags-active-banner" id="tagsActiveBanner" style="display: none;">
+          <div class="tags-active-info">
+            <span class="tags-active-label">Active:</span>
+            <span class="tags-active-name" id="tagsActiveName">#tag</span>
+          </div>
+          <button type="button" class="tags-clear-btn" id="tagsClearBtn">Clear Filter</button>
+        </div>
+
+        <!-- Tags List / Cloud -->
+        <div class="tags-drawer-content" id="tagsDrawerContent">
+          <!-- Populated by JS -->
+        </div>
+      </aside>
     </div>
 
     <!-- 9. Toast Container -->

@@ -14,6 +14,7 @@ import {
   arrayUnion, 
   arrayRemove, 
   query, 
+  where,
   orderBy, 
   serverTimestamp 
 } from "firebase/firestore";
@@ -23,9 +24,55 @@ class MeroDbService {
   constructor() {
     this.videosCollection = collection(db, "videos");
     this.tagsCollection = collection(db, "tags");
+    this.usersCollection = collection(db, "users");
   }
 
-  // --- Firestore Tags Collection & Seeding ---
+  // --- User Profile Management (Firestore 'users' Collection) ---
+  async createUserProfile(user, extraData = {}) {
+    if (!user || !user.uid) return null;
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const snap = await getDoc(userRef);
+      const name = extraData.displayName || user.displayName || "Creator";
+      const defaultAvatar = user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=6366f1,06b6d4`;
+      const cleanHandle = `@${name.toLowerCase().replace(/[^a-z0-9_]/g, "") || "creator"}`;
+
+      if (!snap.exists()) {
+        const userData = {
+          uid: user.uid,
+          email: user.email || "",
+          displayName: name,
+          photoURL: defaultAvatar,
+          handle: cleanHandle,
+          channelName: name,
+          role: "creator",
+          subscribersCount: 0,
+          subscriptions: [],
+          watchLater: [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await setDoc(userRef, userData);
+        console.log("👤 Created user document in Firestore 'users' collection:", user.uid);
+        return userData;
+      } else {
+        const updatePayload = {
+          updatedAt: serverTimestamp()
+        };
+        if (extraData.displayName && (!snap.data().displayName || snap.data().displayName === "Creator")) {
+          updatePayload.displayName = extraData.displayName;
+          updatePayload.channelName = extraData.displayName;
+        }
+        await setDoc(userRef, updatePayload, { merge: true });
+        return { ...snap.data(), ...updatePayload };
+      }
+    } catch (err) {
+      console.error("Failed to create/update user profile in Firestore:", err);
+      return null;
+    }
+  }
+
+  // --- Firestore Tags Collection ---
   async getTags() {
     try {
       const snap = await getDocs(this.tagsCollection);
@@ -34,51 +81,17 @@ class MeroDbService {
         const data = d.data();
         if (data.name) {
           tags.push(data.name);
-        } else if (d.id) {
-          tags.push(d.id.charAt(0).toUpperCase() + d.id.slice(1));
         }
       });
 
-      if (tags.length === 0) {
-        return await this.seedDefaultTags();
+      if (tags.length > 0) {
+        return Array.from(new Set(tags)).sort();
       }
-
-      return Array.from(new Set(tags)).sort();
     } catch (err) {
       console.warn("Could not fetch tags from Firestore:", err);
-      return ["Gaming", "Tech", "Coding", "Lo-Fi", "Design", "Tutorial", "AI", "Music", "Animation", "Vlog", "Podcast", "Entertainment"];
     }
-  }
-
-  async seedDefaultTags() {
-    const defaultTags = [
-      "Gaming", 
-      "Tech", 
-      "Coding", 
-      "Lo-Fi", 
-      "Design", 
-      "Tutorial", 
-      "AI", 
-      "Music", 
-      "Animation", 
-      "Vlog", 
-      "Podcast",
-      "Entertainment"
-    ];
-
-    try {
-      for (const name of defaultTags) {
-        const tagRef = doc(db, "tags", name.toLowerCase());
-        await setDoc(tagRef, {
-          name: name,
-          slug: name.toLowerCase(),
-          createdAt: serverTimestamp()
-        }, { merge: true });
-      }
-    } catch (e) {
-      console.warn("Failed to seed tags in Firestore:", e);
-    }
-    return defaultTags;
+    // Return standard tag suggestions for upload picker without polluting Firestore
+    return ["Gaming", "Tech", "Coding", "Lo-Fi", "Design", "Tutorial", "AI", "Music", "Animation", "Vlog", "Podcast", "Entertainment"];
   }
 
   async addTag(tagName) {
@@ -88,12 +101,16 @@ class MeroDbService {
     const slug = clean.toLowerCase();
     const formatted = clean.charAt(0).toUpperCase() + clean.slice(1);
     try {
-      const tagRef = doc(db, "tags", slug);
-      await setDoc(tagRef, {
-        name: formatted,
-        slug: slug,
-        createdAt: serverTimestamp()
-      }, { merge: true });
+      const q = query(this.tagsCollection, where("slug", "==", slug));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        // Standard auto-generated document ID in Firestore
+        await addDoc(this.tagsCollection, {
+          name: formatted,
+          slug: slug,
+          createdAt: serverTimestamp()
+        });
+      }
     } catch (e) {
       console.warn("Failed to add tag to Firestore:", e);
     }

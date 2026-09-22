@@ -31,10 +31,18 @@ class MeroAuthManager {
     this.syncAuthUI(null);
 
     // Listen to Firebase Auth state
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
       this.currentUser = user;
       console.log("👤 Auth state updated:", user ? `${user.displayName || user.email} (${user.uid})` : "Logged out");
       this.syncAuthUI(user);
+
+      if (user && window.meroDb?.createUserProfile) {
+        try {
+          await window.meroDb.createUserProfile(user);
+        } catch (err) {
+          console.warn("Could not sync user profile to Firestore:", err);
+        }
+      }
 
       // Notify entire app
       window.dispatchEvent(new CustomEvent("mero:auth-state-changed", { detail: { user } }));
@@ -165,6 +173,14 @@ class MeroAuthManager {
           if (name && cred.user) {
             await updateProfile(cred.user, { displayName: name });
           }
+          // Create user document in Firestore 'users' collection
+          if (cred.user && window.meroDb?.createUserProfile) {
+            try {
+              await window.meroDb.createUserProfile(cred.user, { displayName: name });
+            } catch (dbErr) {
+              console.warn("Could not save user document to Firestore:", dbErr);
+            }
+          }
           window.showToast("Account created successfully!");
           this.closeAuthModal();
           if (typeof this.authCallback === "function") {
@@ -185,6 +201,13 @@ class MeroAuthManager {
     try {
       this.setLoading(true);
       const res = await signInWithPopup(auth, this.googleProvider);
+      if (res.user && window.meroDb?.createUserProfile) {
+        try {
+          await window.meroDb.createUserProfile(res.user);
+        } catch (dbErr) {
+          console.warn("Could not sync Google user profile to Firestore:", dbErr);
+        }
+      }
       window.showToast(`Welcome back, ${res.user.displayName || "Creator"}!`);
       this.closeAuthModal();
       if (typeof this.authCallback === "function") {

@@ -8,13 +8,19 @@ class MeroFeedController {
     this.container = null;
     this.chipsContainer = null;
     this.activeCategory = "All";
+    this.activeTag = null;
     this.searchQuery = "";
     this.isLoading = false;
+    this.tagsDrawerOverlay = null;
+    this.tagsDrawerSearchInput = null;
   }
 
   init() {
     this.container = document.getElementById("videoGrid");
     this.chipsContainer = document.getElementById("categoryChips");
+    this.tagsDrawerOverlay = document.getElementById("tagsDrawerOverlay");
+    this.tagsDrawerSearchInput = document.getElementById("tagsDrawerSearchInput");
+    this.initTagsDrawer();
     this.renderCategoryChips();
   }
 
@@ -53,6 +59,198 @@ class MeroFeedController {
     return 0;
   }
 
+  // --- Tags Side Drawer Management ---
+  initTagsDrawer() {
+    const burgerBtn = document.getElementById("tagsBurgerBtn");
+    const closeBtn = document.getElementById("tagsDrawerCloseBtn");
+    const backdrop = document.getElementById("tagsDrawerBackdrop");
+    const searchInput = document.getElementById("tagsDrawerSearchInput");
+    const searchClear = document.getElementById("tagsDrawerSearchClear");
+    const clearFilterBtn = document.getElementById("tagsClearBtn");
+
+    if (burgerBtn) {
+      burgerBtn.addEventListener("click", () => this.toggleTagsDrawer());
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener("click", () => this.closeTagsDrawer());
+    }
+    if (backdrop) {
+      backdrop.addEventListener("click", () => this.closeTagsDrawer());
+    }
+    if (clearFilterBtn) {
+      clearFilterBtn.addEventListener("click", () => this.clearTagFilter());
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener("input", (e) => {
+        const val = e.target.value.trim();
+        if (searchClear) searchClear.style.display = val ? "flex" : "none";
+        this.renderTagsDrawer(val);
+      });
+    }
+
+    if (searchClear && searchInput) {
+      searchClear.addEventListener("click", () => {
+        searchInput.value = "";
+        searchClear.style.display = "none";
+        this.renderTagsDrawer("");
+        searchInput.focus();
+      });
+    }
+
+    // Close on Escape key
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.tagsDrawerOverlay?.classList.contains("open")) {
+        this.closeTagsDrawer();
+      }
+    });
+  }
+
+  openTagsDrawer() {
+    if (!this.tagsDrawerOverlay) return;
+    this.tagsDrawerOverlay.classList.add("open");
+    this.tagsDrawerOverlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+    this.renderTagsDrawer(this.tagsDrawerSearchInput?.value || "");
+
+    setTimeout(() => {
+      this.tagsDrawerSearchInput?.focus();
+    }, 150);
+  }
+
+  closeTagsDrawer() {
+    if (!this.tagsDrawerOverlay) return;
+    this.tagsDrawerOverlay.classList.remove("open");
+    this.tagsDrawerOverlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+  }
+
+  toggleTagsDrawer() {
+    if (this.tagsDrawerOverlay?.classList.contains("open")) {
+      this.closeTagsDrawer();
+    } else {
+      this.openTagsDrawer();
+    }
+  }
+
+  getAllTagsWithCounts() {
+    const counts = new Map();
+    const list = window.MERO_VIDEOS || [];
+
+    list.forEach(v => {
+      if (Array.isArray(v.tags)) {
+        v.tags.forEach(t => {
+          const clean = String(t).replace(/^#+/, "").trim();
+          if (clean) {
+            // Capitalize for clean display
+            const formatted = clean.charAt(0).toUpperCase() + clean.slice(1);
+            const key = formatted.toLowerCase();
+            if (!counts.has(key)) {
+              counts.set(key, { name: formatted, count: 0 });
+            }
+            counts.get(key).count += 1;
+          }
+        });
+      }
+    });
+
+    return Array.from(counts.values());
+  }
+
+  renderTagsDrawer(filterQuery = "") {
+    const listContainer = document.getElementById("tagsDrawerContent");
+    const countLabel = document.getElementById("tagsDrawerCount");
+    const activeBanner = document.getElementById("tagsActiveBanner");
+    const activeName = document.getElementById("tagsActiveName");
+
+    if (!listContainer) return;
+
+    // Sync active banner
+    if (activeBanner && activeName) {
+      if (this.activeTag) {
+        activeBanner.style.display = "flex";
+        activeName.textContent = `#${this.activeTag}`;
+      } else {
+        activeBanner.style.display = "none";
+      }
+    }
+
+    const allTags = this.getAllTagsWithCounts();
+    const q = (filterQuery || "").trim().toLowerCase();
+
+    const filtered = q 
+      ? allTags.filter(item => item.name.toLowerCase().includes(q))
+      : allTags;
+
+    // Sort: highest video count first, then alphabetical
+    filtered.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+    if (countLabel) {
+      countLabel.textContent = `${allTags.length} tag${allTags.length === 1 ? "" : "s"} available`;
+    }
+
+    if (filtered.length === 0) {
+      listContainer.innerHTML = `
+        <div class="drawer-empty-state">
+          <svg class="icon" style="width: 28px; height: 28px; margin-bottom: 8px; color: var(--text-dimmed);" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <p>${q ? `No tags matching "<strong>${q}</strong>"` : "No tags found yet. Tags added to videos will appear here."}</p>
+        </div>
+      `;
+      return;
+    }
+
+    listContainer.innerHTML = "";
+    filtered.forEach(item => {
+      const btn = document.createElement("button");
+      const isSelected = this.activeTag && this.activeTag.toLowerCase() === item.name.toLowerCase();
+      btn.className = `drawer-tag-item ${isSelected ? "active" : ""}`;
+      btn.type = "button";
+      btn.innerHTML = `
+        <span class="tag-name">#${item.name}</span>
+        <span class="tag-video-count">${item.count} video${item.count === 1 ? "" : "s"}</span>
+      `;
+      btn.addEventListener("click", () => {
+        this.selectTagFilter(item.name);
+      });
+      listContainer.appendChild(btn);
+    });
+  }
+
+  selectTagFilter(tagName) {
+    if (!tagName) return;
+    const clean = String(tagName).replace(/^#+/, "").trim();
+    this.activeTag = clean;
+    this.closeTagsDrawer();
+    this.renderCategoryChips();
+    this.syncBurgerButtonUI();
+    this.renderFeed();
+    window.showToast(`Filtered by #${clean}`);
+  }
+
+  clearTagFilter() {
+    this.activeTag = null;
+    this.renderCategoryChips();
+    this.syncBurgerButtonUI();
+    this.renderFeed();
+    if (this.tagsDrawerOverlay?.classList.contains("open")) {
+      this.renderTagsDrawer(this.tagsDrawerSearchInput?.value || "");
+    }
+    window.showToast("Showing all categories");
+  }
+
+  syncBurgerButtonUI() {
+    const burgerBtn = document.getElementById("tagsBurgerBtn");
+    const activeDot = document.getElementById("tagsActiveDot");
+    if (this.activeTag) {
+      burgerBtn?.classList.add("has-active-tag");
+      if (activeDot) activeDot.style.display = "inline-block";
+    } else {
+      burgerBtn?.classList.remove("has-active-tag");
+      if (activeDot) activeDot.style.display = "none";
+    }
+  }
+
+  // --- Render Category Chips (Standard categories only, NO tag clutter) ---
   renderCategoryChips() {
     if (!this.chipsContainer) return;
     this.chipsContainer.innerHTML = "";
@@ -61,51 +259,47 @@ class MeroFeedController {
       ? [...MERO_CATEGORIES]
       : ["All", "Newest", "Most viewed", "Longest"];
 
-    // Also collect tags from all active videos
-    const allTags = new Set();
-    const list = window.MERO_VIDEOS || [];
-    list.forEach(v => {
-      if (Array.isArray(v.tags)) {
-        v.tags.forEach(t => {
-          const clean = String(t).replace(/^#+/, "").trim();
-          if (clean) allTags.add(clean.toLowerCase());
-        });
-      }
-    });
-
-    const pills = [...basePills];
-    allTags.forEach(tag => {
-      const tagChip = `#${tag}`;
-      if (!pills.some(p => p.toLowerCase() === tagChip.toLowerCase())) {
-        pills.push(tagChip);
-      }
-    });
-
-    pills.forEach(cat => {
+    // Render base category buttons
+    basePills.forEach(cat => {
       const btn = document.createElement("button");
-      const isSelected = cat.toLowerCase() === this.activeCategory.toLowerCase();
+      const isSelected = !this.activeTag && cat.toLowerCase() === this.activeCategory.toLowerCase();
       btn.className = `chip-btn ${isSelected ? "active" : ""}`;
       btn.textContent = cat;
       btn.addEventListener("click", () => {
         this.activeCategory = cat;
+        this.activeTag = null;
         this.updateActiveChipUI();
+        this.syncBurgerButtonUI();
+        this.renderCategoryChips();
         this.renderFeed();
       });
       this.chipsContainer.appendChild(btn);
     });
+
+    // If an active tag was chosen from the side drawer, display a distinct dismissible pill in the bar
+    if (this.activeTag) {
+      const tagChip = document.createElement("button");
+      tagChip.className = "chip-btn active tag-active-chip";
+      tagChip.type = "button";
+      tagChip.title = `Active filter: #${this.activeTag}. Click to clear.`;
+      tagChip.innerHTML = `
+        <span>#${this.activeTag}</span>
+        <span class="chip-remove-icon" aria-label="Clear filter">✕</span>
+      `;
+      tagChip.addEventListener("click", () => {
+        this.clearTagFilter();
+      });
+      this.chipsContainer.appendChild(tagChip);
+    }
   }
 
   updateActiveChipUI() {
     if (!this.chipsContainer) return;
-    const chips = this.chipsContainer.querySelectorAll(".chip-btn");
+    const chips = this.chipsContainer.querySelectorAll(".chip-btn:not(.tag-active-chip)");
     chips.forEach(chip => {
-      chip.classList.toggle("active", chip.textContent.toLowerCase() === this.activeCategory.toLowerCase());
+      const isSelected = !this.activeTag && chip.textContent.toLowerCase() === this.activeCategory.toLowerCase();
+      chip.classList.toggle("active", isSelected);
     });
-  }
-
-  setSearchQuery(query) {
-    this.searchQuery = (query || "").trim().toLowerCase();
-    this.renderFeed();
   }
 
   // --- Render Skeletons (Loading State) ---
@@ -140,7 +334,18 @@ class MeroFeedController {
     const active = (this.activeCategory || "All").trim();
     const activeLower = active.toLowerCase();
 
-    // 1. Sort or filter by active category / tag
+    // 1. Tag filter (if active from tags drawer)
+    if (this.activeTag) {
+      const targetTag = this.activeTag.toLowerCase();
+      list = list.filter(v => {
+        return Array.isArray(v.tags) && v.tags.some(t => {
+          const tClean = String(t).replace(/^#+/, "").trim().toLowerCase();
+          return tClean === targetTag;
+        });
+      });
+    }
+
+    // 2. Sort or filter by active category
     if (activeLower === "newest") {
       list.sort((a, b) => this._getVideoTimestamp(b) - this._getVideoTimestamp(a));
     } else if (activeLower === "most viewed") {
@@ -152,15 +357,9 @@ class MeroFeedController {
         return durB - durA;
       });
     } else if (activeLower !== "all") {
-      // It's a tag or specific category
-      const targetTag = activeLower.replace(/^#+/, "");
       list = list.filter(v => {
         const catMatch = v.category && v.category.toLowerCase() === activeLower;
-        const tagMatch = Array.isArray(v.tags) && v.tags.some(t => {
-          const tClean = String(t).replace(/^#+/, "").trim().toLowerCase();
-          return tClean === targetTag;
-        });
-        return catMatch || tagMatch;
+        return catMatch;
       });
     }
 
@@ -273,7 +472,11 @@ class MeroFeedController {
     } finally {
       this.isLoading = false;
       this.renderCategoryChips();
-      this.renderFeed();
+      if (window.meroApp && window.meroApp.currentView && window.meroApp.currentView !== "home") {
+        window.meroApp.handleRouteContent(window.meroApp.currentView);
+      } else {
+        this.renderFeed();
+      }
     }
   }
 
@@ -331,10 +534,13 @@ class MeroFeedController {
     if (resetBtn) {
       resetBtn.addEventListener("click", () => {
         this.activeCategory = "All";
+        this.activeTag = null;
         this.searchQuery = "";
         const searchInput = document.getElementById("searchInput");
         if (searchInput) searchInput.value = "";
         this.updateActiveChipUI();
+        this.syncBurgerButtonUI();
+        this.renderCategoryChips();
         this.renderFeed();
       });
     }

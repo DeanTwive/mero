@@ -81,6 +81,7 @@ window.closeUploadModal = function() {
 class MeroApp {
   constructor() {
     this.currentView = "home";
+    this.previousView = "home";
     this.activeVideo = null;
   }
 
@@ -102,6 +103,16 @@ class MeroApp {
     // State change listener
     window.addEventListener("mero:state-change", () => {
       this.renderSidebarSubscriptions();
+      if (this.currentView === "library" || this.currentView === "subscriptions") {
+        this.handleRouteContent(this.currentView);
+      }
+    });
+
+    // Watch later event listener
+    window.addEventListener("mero:watchlater", () => {
+      if (this.currentView === "library") {
+        this.handleRouteContent("library");
+      }
     });
   }
 
@@ -122,6 +133,20 @@ class MeroApp {
     if (brandBtn) {
       brandBtn.addEventListener("click", () => this.navigateTo("home"));
     }
+
+    // Video Player Back Button (Returns user to previous feed or home)
+    const playerBackBtn = document.getElementById("playerBackBtn");
+    if (playerBackBtn) {
+      playerBackBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.navigateBack();
+      });
+    }
+  }
+
+  navigateBack() {
+    const target = (this.previousView && this.previousView !== "watch") ? this.previousView : "home";
+    this.navigateTo(target);
   }
 
   navigateTo(route) {
@@ -134,21 +159,22 @@ class MeroApp {
 
     const feedSection = document.getElementById("feedSection");
     const watchSection = document.getElementById("watchSection");
-    const categoryChips = document.getElementById("categoryChips");
+    const feedFilterBar = document.getElementById("feedFilterBar") || document.getElementById("categoryChips");
 
-    // Close drawer on mobile when navigating away
-    window.meroDrawer.closeDrawer();
+    // Close drawers when navigating
+    window.meroDrawer?.closeDrawer();
+    window.meroFeed?.closeTagsDrawer();
 
     if (route === "watch") {
       if (feedSection) feedSection.style.display = "none";
       if (watchSection) watchSection.style.display = "block";
-      if (categoryChips) categoryChips.style.display = "none";
+      if (feedFilterBar) feedFilterBar.style.display = "none";
       window.meroPlayer.hideMiniPlayer();
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
       if (feedSection) feedSection.style.display = "block";
       if (watchSection) watchSection.style.display = "none";
-      if (categoryChips) categoryChips.style.display = "flex";
+      if (feedFilterBar) feedFilterBar.style.display = "flex";
 
       // If a video is playing, show the floating mini-player!
       if (window.meroPlayer.currentVideo && !window.meroPlayer.videoEl?.paused) {
@@ -256,8 +282,13 @@ class MeroApp {
         return;
       }
 
-      // Logged in: show real saved videos
-      const savedIds = window.meroStore.state.watchLater;
+      // Ensure store is aligned with current authenticated user
+      if (window.meroStore && user && window.meroStore.currentUid !== user.uid) {
+        window.meroStore.setUser(user);
+      }
+
+      // Logged in: show real saved videos for current authenticated user
+      const savedIds = Array.isArray(window.meroStore?.state?.watchLater) ? window.meroStore.state.watchLater : [];
       const savedVideos = (window.MERO_VIDEOS || []).filter(v => savedIds.includes(v.id));
       if (savedVideos.length === 0) {
         const grid = document.getElementById("videoGrid");
@@ -286,6 +317,9 @@ class MeroApp {
     if (!video) {
       window.showToast("No videos available.");
       return;
+    }
+    if (this.currentView && this.currentView !== "watch") {
+      this.previousView = this.currentView;
     }
     this.activeVideo = video;
 
@@ -362,17 +396,49 @@ class MeroApp {
       };
     }
 
-    // Save to Watch Later button
+    // Save to Watch Later buttons (Action Bar Pill + Player Overlay Quick Button)
     const saveBtn = document.getElementById("watchSaveBtn");
+    const playerQuickSaveBtn = document.getElementById("playerQuickSaveBtn");
     const isSaved = window.meroStore.isWatchLater(video.id);
-    if (saveBtn) {
-      saveBtn.classList.toggle("active", isSaved);
-      saveBtn.onclick = () => {
-        const nowSaved = window.meroStore.toggleWatchLater(video.id);
-        saveBtn.classList.toggle("active", nowSaved);
-        window.showToast(nowSaved ? "Saved to Watch Later" : "Removed from Watch Later");
-      };
-    }
+
+    const updateSaveUI = (saved) => {
+      if (saveBtn) {
+        saveBtn.classList.toggle("active", saved);
+        const label = saveBtn.querySelector("span");
+        if (label) label.textContent = saved ? "Saved" : "Save";
+        const icon = saveBtn.querySelector(".icon");
+        if (icon) {
+          icon.innerHTML = saved
+            ? `<path d="M20 6L9 17l-5-5"></path>`
+            : `<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>`;
+        }
+      }
+      if (playerQuickSaveBtn) {
+        playerQuickSaveBtn.classList.toggle("active", saved);
+        playerQuickSaveBtn.setAttribute("title", saved ? "Saved to Watch Later (Click to remove)" : "Save to Watch Later");
+        playerQuickSaveBtn.setAttribute("aria-label", saved ? "Saved to Watch Later" : "Save to Watch Later");
+        const qIcon = playerQuickSaveBtn.querySelector(".icon");
+        if (qIcon) {
+          qIcon.innerHTML = saved
+            ? `<polyline points="20 6 9 17 4 12" stroke-width="2.5"></polyline>`
+            : `<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>`;
+        }
+      }
+    };
+
+    const handleToggleSave = (e) => {
+      if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+      const nowSaved = window.meroStore.toggleWatchLater(video.id);
+      updateSaveUI(nowSaved);
+      window.showToast(nowSaved ? "Saved to Watch Later" : "Removed from Watch Later");
+    };
+
+    if (saveBtn) saveBtn.onclick = handleToggleSave;
+    if (playerQuickSaveBtn) playerQuickSaveBtn.onclick = handleToggleSave;
+    updateSaveUI(isSaved);
 
     // Share button
     const shareBtn = document.getElementById("watchShareBtn");
@@ -470,20 +536,9 @@ class MeroApp {
 
     this.navigateTo("home");
 
-    const searchInput = document.getElementById("searchInput");
-    const clearBtn = document.getElementById("searchClearBtn");
-    if (searchInput) {
-      searchInput.value = `#${clean}`;
-      if (clearBtn) clearBtn.classList.add("active");
-    }
-
     if (window.meroFeed) {
-      window.meroFeed.activeCategory = `#${clean}`;
-      window.meroFeed.updateActiveChipUI();
-      window.meroFeed.setSearchQuery(clean);
+      window.meroFeed.selectTagFilter(clean);
     }
-
-    window.showToast(`Showing videos tagged with #${clean}`);
   }
 
   // --- Sleep Timer Modal ---
