@@ -183,6 +183,21 @@ class MeroPlayerController {
       fsBtn.addEventListener("click", () => this.toggleFullscreen());
     }
 
+    const onFullscreenChange = () => {
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (this.playerWrap) {
+        this.playerWrap.classList.toggle("is-fullscreen", isFs);
+      }
+      this.updateFullscreenBtnUI(isFs);
+    };
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    if (this.videoEl) {
+      this.videoEl.addEventListener("webkitbeginfullscreen", () => onFullscreenChange());
+      this.videoEl.addEventListener("webkitendfullscreen", () => onFullscreenChange());
+    }
+
     // Picture-in-Picture
     const pipBtn = document.getElementById("playerPipBtn");
     if (pipBtn) {
@@ -963,10 +978,45 @@ class MeroPlayerController {
 
   // --- Fullscreen & Picture-in-Picture ---
   toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      this.playerWrap.requestFullscreen().catch(err => console.warn(err));
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!isFs) {
+      const el = this.playerWrap;
+      if (el && el.requestFullscreen) {
+        el.requestFullscreen().catch(err => {
+          console.warn("requestFullscreen failed, falling back to video element:", err);
+          if (this.videoEl && this.videoEl.webkitEnterFullscreen) {
+            this.videoEl.webkitEnterFullscreen();
+          } else if (this.videoEl && this.videoEl.requestFullscreen) {
+            this.videoEl.requestFullscreen().catch(e => console.warn(e));
+          }
+        });
+      } else if (el && el.webkitRequestFullscreen) {
+        el.webkitRequestFullscreen();
+      } else if (this.videoEl && this.videoEl.webkitEnterFullscreen) {
+        this.videoEl.webkitEnterFullscreen();
+      } else if (this.videoEl && this.videoEl.requestFullscreen) {
+        this.videoEl.requestFullscreen().catch(err => console.warn(err));
+      }
     } else {
-      document.exitFullscreen();
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(err => console.warn(err));
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    }
+  }
+
+  updateFullscreenBtnUI(isFs) {
+    const fsBtn = document.getElementById("playerFullscreenBtn");
+    if (!fsBtn) return;
+    if (isFs) {
+      fsBtn.setAttribute("title", "Exit Fullscreen (F)");
+      fsBtn.setAttribute("aria-label", "Exit Fullscreen");
+      fsBtn.innerHTML = `<svg class="icon" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>`;
+    } else {
+      fsBtn.setAttribute("title", "Fullscreen (F)");
+      fsBtn.setAttribute("aria-label", "Fullscreen");
+      fsBtn.innerHTML = `<svg class="icon" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>`;
     }
   }
 

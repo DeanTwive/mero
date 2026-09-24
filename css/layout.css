@@ -29,6 +29,9 @@
   justify-content: space-between;
   padding: 0 var(--space-16);
   gap: var(--space-16);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100vw;
 }
 
 .brand-section {
@@ -80,6 +83,7 @@
   max-width: 580px;
   position: relative;
   margin: 0 auto;
+  min-width: 0;
 }
 
 .search-form {
@@ -92,6 +96,7 @@
   border-radius: var(--radius-full);
   padding: 0 var(--space-12);
   transition: all var(--transition-fast);
+  min-width: 0;
 }
 
 .search-form:focus-within {
@@ -106,6 +111,7 @@
   color: var(--text-primary);
   padding: 0 var(--space-8);
   min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .search-input::placeholder {
@@ -180,6 +186,7 @@
   cursor: pointer;
   color: var(--text-secondary);
   transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .avatar-btn:hover {
@@ -317,10 +324,18 @@
   flex: 1;
   min-width: 0;
   padding: var(--space-16);
-  padding-bottom: calc(var(--bottom-nav-height) + var(--space-32));
+  padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + var(--space-28));
   display: flex;
   flex-direction: column;
   gap: var(--space-20);
+}
+
+@media (max-width: 600px) {
+  .main-content {
+    padding: var(--space-12);
+    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + var(--space-24));
+    gap: var(--space-16);
+  }
 }
 
 @media (min-width: 1024px) {
@@ -409,6 +424,7 @@
   -webkit-overflow-scrolling: touch;
   flex: 1;
   min-width: 0;
+  padding-right: var(--space-12);
 }
 
 .category-chips-bar::-webkit-scrollbar {
@@ -761,14 +777,15 @@
   left: 0;
   right: 0;
   z-index: 60;
-  height: var(--bottom-nav-height);
+  height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px));
   background: var(--glass-bg);
   backdrop-filter: var(--glass-backdrop-blur);
   -webkit-backdrop-filter: var(--glass-backdrop-blur);
   border-top: 1px solid var(--glass-border);
   justify-content: space-around;
   align-items: center;
-  padding: 0 var(--space-8);
+  padding: 0 var(--space-8) env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
 }
 
 .bottom-bar-item {
@@ -806,6 +823,96 @@
   }
   .mobile-bottom-bar {
     display: flex;
+  }
+}
+
+/* Mobile Top Header & Search Rules */
+@media (max-width: 600px) {
+  .top-header {
+    padding: 0 var(--space-10);
+    gap: var(--space-8);
+    height: 56px;
+  }
+
+  .brand-section {
+    gap: 6px;
+  }
+
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+  }
+
+  .brand-mark svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .brand-logo-btn {
+    font-size: 1.15rem;
+  }
+
+  .header-search {
+    min-width: 0;
+    margin: 0;
+  }
+
+  .search-form {
+    height: 36px;
+    padding: 0 var(--space-8);
+  }
+
+  .search-input {
+    font-size: 0.8rem;
+    padding: 0 var(--space-4);
+    min-width: 0;
+  }
+
+  .avatar-btn {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .header-actions {
+    gap: var(--space-4);
+  }
+
+  .feed-filter-bar {
+    gap: var(--space-8);
+    margin-bottom: 0;
+  }
+
+  .chip-btn {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 var(--space-12);
+    font-size: 0.8rem;
+  }
+
+  .tags-burger-btn {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 var(--space-10);
+    font-size: 0.8rem;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 380px) {
+  .top-header {
+    padding: 0 var(--space-8);
+    gap: 6px;
+  }
+
+  .brand-logo-btn .brand-text {
+    font-size: 1.05rem;
+  }
+
+  .avatar-btn {
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
   }
 }
 

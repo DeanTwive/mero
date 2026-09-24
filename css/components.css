@@ -190,6 +190,76 @@
   stroke: var(--color-accent);
 }
 
+@media (max-width: 768px) {
+  .watch-creator-actions-bar {
+    gap: var(--space-10);
+    padding: var(--space-10) 0;
+  }
+
+  .creator-profile-info {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .btn-subscribe {
+    height: 36px;
+    min-height: 36px;
+    padding: 0 var(--space-16);
+    font-size: 0.82rem;
+  }
+
+  .watch-actions-group {
+    width: 100%;
+    gap: 6px;
+    padding: 2px 0 4px 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .segmented-pill {
+    height: 36px;
+  }
+
+  .pill-segment-btn {
+    padding: 0 var(--space-12);
+    font-size: 0.82rem;
+    gap: 5px;
+  }
+
+  .pill-segment-btn .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .action-pill-btn {
+    height: 36px;
+    min-height: 36px;
+    padding: 0 var(--space-12);
+    font-size: 0.82rem;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  .action-pill-btn .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .mobile-only-quick-tabs .action-pill-btn {
+    height: 36px;
+    min-height: 36px;
+    font-size: 0.8rem;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-modal-card,
+  .upload-modal-card {
+    padding: var(--space-16);
+    border-radius: var(--radius-lg);
+  }
+}
+
 /* --------------------------------------------------------------------------
    Collapsible Description Box
    -------------------------------------------------------------------------- */

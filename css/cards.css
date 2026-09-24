@@ -177,10 +177,27 @@
   color: var(--text-primary);
   line-height: var(--leading-snug);
   transition: color var(--transition-fast);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .video-card:hover .card-title {
   color: #ffffff;
+}
+
+@media (max-width: 600px) {
+  .card-info-wrap {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .card-author-avatar {
+    width: 36px;
+    height: 36px;
+  }
 }
 
 .card-creator-row {
